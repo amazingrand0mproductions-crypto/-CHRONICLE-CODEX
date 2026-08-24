@@ -117,6 +117,268 @@ var LC_GENERIC_WORDS = new Set([
   "Question","Answer","Moment","Hour","Minute","Week","Month","Year","Name","Power","Magic","Energy","Blood"
 ]);
 
+
+// Comprehensive ordinary-word shield. This deliberately folds the broad
+// stopword/generic vocabulary from the original UNSPOKEN TURNS Codex into the
+// rebuilt detector, then applies it conservatively: explicit naming language
+// can still establish an unusual proper name such as “Coffee”, while ordinary
+// prose cannot become a Story Card merely because a word was capitalized.
+var LC_ORDINARY_STOPWORDS = new Set([
+  "a","abilities","ability","able","aboard","about","above","abruptly","absolutely","accept","accepted","accepting",
+  "accepts","according","accordingly","acknowledge","acknowledged","acknowledges","acknowledging","across","action","actions","active","actually",
+  "adapt","adaptation","adaptive","add","added","adding","additionally","adds","admit","admits","admitted","admittedly",
+  "admitting","adult","adults","adventure","adventures","afraid","after","afternoon","afterwards","again","against","ago",
+  "agree","agreed","agreeing","agrees","ah","ahead","ai","air","ale","alive","all","alleged",
+  "allegedly","allow","almost","alone","along","alongside","already","alright","also","although","altogether","always",
+  "am","amid","amidst","among","amongst","an","ancient","and","angry","announce","announced","announces",
+  "announcing","another","answer","answered","answering","answers","anxious","any","anybody","anyone","anything","anyway",
+  "anywhere","apart","apparent","apparently","appear","appearance","appeared","appears","appetizer","appetizers","apple","apples",
+  "approach","approached","approaches","approaching","approximately","april","are","area","areas","aren't","argh","arguably",
+  "argue","argued","argues","arguing","arm","arms","around","arrive","arrived","arrives","arriving","as",
+  "aside","ask","asked","asking","asks","assistant","at","attempts","attic","august","author","authors",
+  "automatic","automatically","autumn","awake","aware","away","azure","back","backed","background","backing","backs",
+  "backup","bacon","bad","bag","bagel","bagels","bags","baked","balcony","banana","bananas","banquet",
+  "bar","bare","barely","bark","barked","barking","barks","bars","basement","basic","basically","bathroom",
+  "bathrooms","be","bean","beans","beautiful","became","because","become","becomes","becoming","bed","bedroom",
+  "bedrooms","beds","beef","been","beer","before","beg","began","begged","begging","begin","beginning",
+  "begins","begs","begun","behind","being","believe","believed","believes","believing","belonging","belongings","below",
+  "bend","bending","bends","beneath","bent","berries","berry","beside","besides","best","better","between",
+  "beverage","beverages","beyond","bicycle","bicycles","big","bike","bikes","billion","biscuit","biscuits","bitter",
+  "black","blank","blanket","blankets","blink","blinked","blinking","blinks","blood","blue","blurt","blurted",
+  "blurting","blurts","bodies","body","boiled","bold","book","books","boot","boots","both","bottle",
+  "bottles","bottom","bow","bowed","bowing","bowl","bowls","bows","box","boxes","bread","break",
+  "breakfast","breaking","breaks","breath","breathe","breathed","breathes","breathing","breaths","brewing","bridge","bridges",
+  "brief","briefly","bright","bring","bringing","brings","broad","broke","broken","bronze","brought","brown",
+  "brownie","brownies","brunch","brush","brushed","brushes","brushing","buffet","building","buildings","bun","buns",
+  "burger","burgers","buried","buries","bury","burying","bus","buses","but","butter","by","bye",
+  "cabinet","cabinets","cache","cafe","cafes","cake","cakes","call","called","calling","calls","calm",
+  "came","can","can't","candies","candy","cannot","canon","canonical","cappuccino","car","card","cards",
+  "care","cared","careful","carefully","cares","caring","carried","carries","carrot","carrots","carry","carrying",
+  "cars","cash","catalog","catch","catches","catching","categories","category","caught","ceiling","ceilings","center",
+  "centre","cereal","certain","certainly","chair","chairs","champagne","chance","chapter","chapters","character","characters",
+  "cheese","cheesecake","cheesy","chest","chicken","chili","chips","chocolate","choice","choices","chuckle","chuckled",
+  "chuckles","chuckling","cider","circle","circled","circles","circling","clean","clear","clearly","climb","climbed",
+  "climbing","climbs","close","closed","closes","closing","clothes","clothing","cloud","clouds","cluster","clusters",
+  "coat","coats","cocktail","cocktails","cocoa","codex","coffee","cola","cold","come","comes","coming",
+  "command","commands","common","complete","compound","computer","computers","concerned","concerning","confess","confessed","confesses",
+  "confessing","config","configuration","confused","consequently","consider","considered","considering","considers","console","consoles","context",
+  "continuation","continue","continued","continues","continuing","controller","controllers","conversation","conversations","conversely","cooked","cookie",
+  "cookies","cool","cooldown","core","corn","corner","corridor","corridors","couch","couches","could","couldn't",
+  "counter","counters","countless","course","courses","crab","cream","creamy","cried","cries","crimson","crisps",
+  "crispy","croissant","croissants","cross","crossed","crosses","crossing","crouch","crouched","crouches","crouching","cry",
+  "crying","cup","cupcake","cupcakes","cups","curiously","current","currently","curries","curry","custard","cyan",
+  "damn","dark","darkness","dawn","day","days","daytime","dead","deadline","death","debug","december",
+  "decide","decided","decides","deciding","declare","declared","declares","declaring","deep","default","defaults","definitely",
+  "delivery","demand","demanded","demanding","demands","descend","descended","descending","descends","description","desk","desks",
+  "despite","dessert","desserts","detail","details","detected","diagnostic","diagnostics","dialogue","did","didn't","different",
+  "difficult","diner","diners","dinner","dip","dips","directly","dirty","disabled","dish","dishes","distance",
+  "distant","do","does","doesn't","doing","don't","done","donut","donuts","door","doors","doorway",
+  "double","doughnut","doughnuts","down","downstairs","draw","drawer","drawers","drawing","drawn","draws","dream",
+  "dreams","dress","dresses","dressing","drew","drink","drinks","drop","dropped","dropping","drops","dry",
+  "duck","dungeon","during","dusk","each","earbuds","earlier","early","earphones","east","eastern","easy",
+  "edge","egg","eggs","eight","eighteen","eighteenth","eighth","eighty","either","eleven","eleventh","eligible",
+  "else","elsewhere","empty","enable","enabled","end","ending","enough","enter","entered","entering","enters",
+  "entire","entities","entity","entrance","entree","entrees","entries","entry","entrée","entrées","era","eras",
+  "escape","escaped","escapes","escaping","especially","espresso","essentially","essentials","established","even","evening","event",
+  "events","eventually","every","everybody","everyone","everything","evidence","evidently","exact","exactly","example","examples",
+  "excellent","except","exclaim","exclaimed","exclaiming","exclaims","excluding","excuse","exhale","exhaled","exhales","exhaling",
+  "exit","expect","expected","expecting","expects","explain","explained","explaining","explains","expression","expressions","eye",
+  "eyes","face","faces","fact","faction","facts","faint","fall","fallen","falling","falls","false",
+  "familiar","family","far","fast","fate","fear","feared","fearing","fears","feast","february","feel",
+  "feeling","feelings","feels","feet","fell","felt","few","fewer","field","fields","fifteen","fifteenth",
+  "fifth","fifty","final","finally","fine","finger","fingers","finish","first","fish","fitting","five",
+  "flat","flinch","flinched","flinches","flinching","floor","floors","flour","fog","follow","followed","following",
+  "follows","food","foods","foot","footsteps","for","forced","foreshadow","forest","forests","forever","forget",
+  "forgets","forgetting","forgot","forgotten","fork","forks","format","formatting","former","fortunately","forty","four",
+  "fourteen","fourteenth","fourth","frankly","free","freeze","freezes","freezing","frequently","fresh","friday","fried",
+  "friend","friends","fries","from","front","frontmemory","frost","frown","frowned","frowning","frowns","froze",
+  "frozen","fruit","fruits","full","game","gamepad","gamepads","games","garage","garden","garlic","garlicky",
+  "gasp","gasped","gasping","gasps","gaze","gelato","general","generally","genre","genres","gentle","gently",
+  "genuinely","gesture","gestured","gestures","gesturing","giggle","giggled","giggles","giggling","gin","given","glance",
+  "glanced","glances","glancing","glass","glasses","glove","gloves","go","goes","gold","golden","good",
+  "goodbye","goose","got","grab","grabbed","grabbing","grabs","gradually","grape","grapes","gravy","gray",
+  "great","green","greetings","grey","grilled","grin","grinned","grinning","grins","ground","grounded","growl",
+  "growled","growling","growls","guess","guessed","guesses","guessing","had","hadn't","hair","half","hall",
+  "hallway","hallways","halt","halted","halting","halts","ham","hamburger","hamburgers","hand","handheld","handhelds",
+  "hands","hard","has","hasn't","hat","hate","hated","hates","hating","hats","have","haven't",
+  "having","he","he'd","he'll","he's","head","headed","heading","heads","headset","headsets","hear",
+  "heard","hearing","hears","heart","hearts","heavy","heh","held","hello","help","hence","her",
+  "herb","herbs","here","here's","hers","herself","hey","hi","hidden","high","hill","hills",
+  "him","himself","hint","his","hiss","hissed","hisses","hissing","historical","history","hmm","hold",
+  "holding","holds","hollow","home","honestly","honesty","hook","hooks","hoped","hopefully","hopes","hoping",
+  "hospital","hospitals","hot","hour","hours","how","however","huge","huh","hundred","hush","i",
+  "i'd","i'll","i'm","i've","ice","icecream","idea","ideas","if","imagine","imagined","imagines",
+  "imagining","immediately","important","impossible","in","inactive","including","incomplete","increasingly","indeed","indoors","information",
+  "ingredient","ingredients","inhale","inhaled","inhales","inhaling","initially","input","inside","insist","insisted","insisting",
+  "insists","instead","instruction","instructional","instructions","interestingly","interior","intimate","into","is","isn't","it",
+  "it'll","it's","item","items","its","itself","jacket","jackets","jam","january","jaw","jelly",
+  "job","jobs","juice","july","jump","jumped","jumping","jumps","june","just","keep","keeping",
+  "keeps","kept","key","keyboard","keyboards","kitchen","kitchens","kneel","kneeling","kneels","knelt","knew",
+  "knife","knives","know","knowing","known","knows","lager","lake","lakes","lamb","lamp","lamps",
+  "laptop","laptops","large","largely","lasagna","lasagne","last","late","later","latest","latte","latter",
+  "laugh","laughed","laughing","laughs","lean","leaned","leaning","leans","leave","leaves","leaving","left",
+  "leg","legs","lemon","lemonade","lemons","less","let","let's","letter","letters","level","libraries",
+  "library","lie","lies","life","lift","lifted","lifting","lifts","light","lightning","lights","lightweight",
+  "like","liked","likes","liking","lime","limes","lips","liquor","listen","literally","little","livingroom",
+  "lobster","local","location","locations","log","logic","logs","long","look","looked","looking","looks",
+  "lore","loud","love","loved","loves","loving","low","lower","lowered","lowering","lowers","lunch",
+  "macaroni","magenta","main","major","mandatory","mango","mangoes","manual","many","march","marker","markers",
+  "market","markets","master","mature","maximum","may","maybe","me","meal","meals","mean","meaning",
+  "means","meant","meanwhile","meat","meats","melon","memories","memory","mention","mentioned","mentioning","mentions",
+  "menu","menus","merely","message","messages","mice","midday","middle","midnight","might","milk","milkshake",
+  "million","mind","minded","minding","minds","mine","minimum","minor","minute","minutes","mirror","mirrors",
+  "mist","mocha","mocktail","mocktails","model","models","modem","modems","modern","moment","moments","monday",
+  "money","monitor","monitors","month","months","moon","more","morning","most","mostly","mountain","mountains",
+  "mouse","mouth","move","moved","moves","moving","much","muffin","muffins","mug","mugs","multiple",
+  "mumble","mumbled","mumbles","mumbling","murmur","murmured","murmuring","murmurs","mushroom","mushrooms","music","must",
+  "mustn't","mutter","muttered","muttering","mutters","mutton","my","myself","nah","name","names","napkin",
+  "napkins","narration","narrative","narrator","narrow","naturally","near","nearby","nearly","need","needed","needing",
+  "needs","neither","never","nevertheless","new","newest","news","next","nice","night","nighttime","nine",
+  "nineteen","nineteenth","ninety","ninth","no","nobody","nod","nodded","nodding","nods","noise","noises",
+  "none","nonetheless","noodle","noodles","noon","noone","nope","nor","normal","normally","north","northeast",
+  "northern","northwest","not","notably","note","noted","notes","nothing","notice","noticed","notices","noticing",
+  "noting","november","now","nowadays","nowhere","null","numerous","oatmeal","object","objects","observe","observed",
+  "observes","observing","obvious","obviously","occasionally","october","oddly","of","off","office","offices","often",
+  "oh","oil","ok","okay","old","oldest","omelet","omelette","on","once","one","onion",
+  "onions","only","onto","oof","open","opened","opening","opens","opposite","optimized","optional","or",
+  "orange","oranges","ordinary","origin","other","others","otherwise","ought","our","ours","ourselves","out",
+  "outdoors","output","outside","over","overall","overhead","overnight","override","overrides","own","pace","paced",
+  "paces","pacing","page","pages","pale","pancake","pancakes","pants","paper","papers","paragraph","paragraphs",
+  "pardon","park","parks","part","partial","particularly","parts","pass","passed","passes","passing","past",
+  "pasta","pastries","pastry","path","paths","patience","pause","paused","pauses","pausing","payoff","peach",
+  "peaches","pear","pears","peas","peer","peered","peering","peers","pending","people","pepper","peppers",
+  "perhaps","person","personal","personality","phew","phone","phones","photo","photos","pick","picked","picking",
+  "picks","picture","pictures","pie","pies","pillow","pillows","pineapple","pink","pivot","pivoted","pivoting",
+  "pivots","pizza","pizzas","place","placed","places","placing","plain","plan","plans","plate","plates",
+  "player","players","please","plot","point","pointed","pointing","points","pop","porch","pork","porridge",
+  "portion","portions","possession","possessions","possible","possibly","posture","potato","potatoes","practically","prawn","prawns",
+  "precisely","predictably","prefer","preferred","preferring","prefers","present","presently","presumably","previous","printer","printers",
+  "private","probably","problem","problems","profile","profiles","prompt","promptly","prompts","properties","protest","protested",
+  "protesting","protests","pudding","pull","pulled","pulling","pulls","purple","push","pushed","pushes","pushing",
+  "quarter","quest","question","questioned","questioning","questions","quick","quickly","quiet","quietly","quite","race",
+  "rain","raise","raised","raises","raising","ramen","ran","rarely","rather","raw","reach","reached",
+  "reaches","reaching","ready","real","realize","realized","realizes","realizing","really","recall","recalled","recalling",
+  "recalls","recent","recently","recipe","recipes","recognize","recognized","recognizes","recognizing","recoil","recoiled","recoiling",
+  "recoils","red","regarding","regardless","relationship","relationships","relatively","remain","remained","remaining","remains","remark",
+  "remarked","remarking","remarks","remember","remembered","remembering","remembers","reminder","repeat","repeated","repeating","repeats",
+  "replied","replies","reply","replying","reported","reportedly","required","reset","resolved","respond","responded","responding",
+  "responds","response","responses","restaurant","restaurants","retries","retry","return","returned","returning","returns","rice",
+  "right","rise","risen","rises","rising","risotto","river","rivers","road","roads","roasted","roll",
+  "rolls","roof","roofs","room","rooms","rough","roughly","round","router","routers","rule","rules",
+  "rum","rumored","rumoured","run","running","runs","s","safe","said","salad","salads","salmon",
+  "salt","salty","same","sandwich","sandwiches","sat","saturday","sauce","sauces","sausage","sausages","savory",
+  "savoury","saw","say","saying","says","scale","scales","scarf","scarlet","scarves","scenario","scenarios",
+  "scene","scenes","scent","school","schools","screen","screens","script","scripts","seafood","season","seasoning",
+  "seasonings","seasons","second","secret","secrets","section","sections","seed","seeds","seeing","seem","seemed",
+  "seems","seen","sense","sensed","senses","sensing","september","serious","seriously","serving","servings","setting",
+  "settings","settle","settled","settles","settling","seven","seventeen","seventeenth","seventh","seventy","several","shadow",
+  "shadows","shake","shaken","shakes","shaking","shall","sharp","she","she'd","she'll","she's","shelf",
+  "shelves","shift","shifted","shifting","shifts","shirt","shirts","shoe","shoes","shook","shop","shops",
+  "short","shortly","should","shoulder","shoulders","shouldn't","shout","shouted","shouting","shouts","shrimp","shrug",
+  "shrugged","shrugging","shrugs","side","sigh","sighed","sighing","sighs","significance","silence","silent","silver",
+  "simple","simply","since","single","sit","site","sites","sits","sitting","six","sixteen","sixteenth",
+  "sixth","sixty","sky","slightly","slow","slowly","small","smartwatch","smartwatches","smell","smile","smiled",
+  "smiles","smiling","smoked","smooth","smoothie","smoothies","snack","snacks","snap","snapped","snapping","snaps",
+  "snow","so","soda","sofa","sofas","soft","softly","solid","some","somebody","someday","somehow",
+  "someone","something","sometime","sometimes","somewhat","somewhere","song","songs","soon","sorry","sound","sounds",
+  "soup","soups","sour","south","southeast","southern","southwest","space","spaghetti","speak","speaker","speakers",
+  "speaking","speaks","special","specials","specifically","speculative","spice","spices","spicy","spin","spinning","spins",
+  "spirits","spoke","spoken","spoon","spoons","spot","spots","spring","spun","staircase","stairs","stale",
+  "stammer","stammered","stammering","stammers","stance","stand","standing","stands","star","stare","stared","stares",
+  "staring","stars","start","started","starter","starters","starting","starts","state","stated","states","stating",
+  "status","stay","steady","steak","steaks","steamed","step","stepped","stepping","steps","stew","stews",
+  "still","stood","stop","stopped","stopping","stops","store","stores","stories","storm","story","storycard",
+  "storycards","strange","strangely","street","streets","strength","strict","strong","stuff","stumble","stumbled","stumbles",
+  "stumbling","subtle","such","sudden","suddenly","sugar","summaries","summary","summer","sun","sunday","sunrise",
+  "sunset","supper","suppose","supposed","supposedly","supposes","supposing","sure","surely","surface","surprisingly","swallow",
+  "swallowed","swallowing","swallows","sweet","sweets","system","systems","table","tables","tablet","tablets","take",
+  "taken","takes","taking","talking","tall","tart","tarts","task","tasks","taste","tbd","tea",
+  "teal","technically","television","tell","telling","tells","temperature","template","templates","ten","tenth","tequila",
+  "terrific","text","texts","than","thank","thanks","that","that'll","that's","the","their","theirs",
+  "them","theme","themes","themselves","then","there","there'll","there's","thereby","therefore","these","they",
+  "they'd","they'll","they're","they've","thin","thing","things","think","thinking","thinks","third","thirteen",
+  "thirteenth","thirty","this","those","though","thought","thoughts","thousand","thread","threads","three","through",
+  "throughout","thunder","thursday","thus","till","tilt","tilted","tilting","tilts","time","times","tiny",
+  "tired","to","toast","toasted","today","together","told","tomato","tomatoes","tomorrow","tone","tones",
+  "tonight","too","took","top","total","toward","towards","towel","towels","tracked","tracking","traffic",
+  "trail","trails","train","trains","tree","trees","tremble","trembled","trembles","trembling","triple","trousers",
+  "truck","trucks","true","truth","truths","tuesday","tuna","turkey","turn","turncount","turned","turning",
+  "turns","tv","twelfth","twelve","twentieth","twenty","twice","twilight","twist","twists","two","type",
+  "typically","ugh","uh","ultimately","um","unclear","under","underneath","understand","understandably","understanding","understands",
+  "understood","unfortunately","unknown","unless","unlike","unsaid","until","unto","unusual","up","upon","upstairs",
+  "us","user","usually","vegetable","vegetables","veggie","veggies","vehicle","vehicles","version","versus","very",
+  "via","vinegar","violet","virtually","visible","vodka","voice","voices","waffle","waffles","wait","waited",
+  "waits","walk","walked","walking","walks","wall","walls","want","wanted","wanting","wants","warm",
+  "warning","was","wasn't","watch","watched","watches","watching","water","wave","waved","waves","waving",
+  "we","we'd","we'll","we're","we've","weak","weakness","weaknesses","weather","wednesday","week","weekday",
+  "weekend","weeks","well","went","were","weren't","west","western","wet","what","what'll","what's",
+  "whatever","when","whenever","where","whereas","wherever","whether","which","whichever","while","whilst","whiskey",
+  "whisky","whisper","whispered","whispering","whispers","white","who","who'll","who's","whoever","whole","wholly",
+  "whom","whomever","whose","why","wide","widely","wildcard","wince","winced","winces","wincing","wind",
+  "window","windows","wine","winter","wish","wished","wishes","wishing","with","within","without","won't",
+  "wonder","wondered","wondering","wonders","work","world","worlds","worst","would","wouldn't","wow","wrap",
+  "wraps","wrong","yard","yeah","year","years","yell","yelled","yelling","yellow","yells","yep",
+  "yes","yesterday","yet","yoghurt","yogurt","you","you'd","you'll","you're","you've","young","your",
+  "yours","yourself","yourselves","zero",
+
+]);
+
+// Common descriptive/material/state modifiers that frequently appear in
+// capitalized noun phrases ("Old Wooden Door", "Broken Glass Window").
+// Keeping them separate makes the intent auditable while still feeding the
+// same ordinary-word shield.
+[
+  "wooden","metal","metallic","stone","stony","glass","glassy","plastic","leather","iron","steel","copper","brass","bronze","paper","cardboard","cloth","fabric","wool","woollen","cotton","silk","ceramic","crystal","concrete","brick","marble","granite","oak","pine","rubber","vinyl","chrome",
+  "broken","cracked","chipped","damaged","ruined","worn","weathered","rusted","rusty","dirty","dusty","muddy","wet","dry","damp","soaked","bloody","stained","clean","polished","shiny","dull","open","closed","locked","unlocked","sealed","hidden","visible","empty","filled","packed","abandoned","occupied",
+  "heavy","lightweight","thick","thin","wide","narrow","tall","low","high","deep","shallow","round","square","flat","sharp","blunt","smooth","rough","soft","hard","warm","hot","cold","cool","freezing","burning","bright","dim","dark","pale","faint","glowing","flashing","flickering",
+  "quiet","silent","loud","noisy","busy","crowded","deserted","lonely","remote","nearby","distant","local","public","private","secret","hidden","ordinary","normal","strange","weird","odd","unusual","familiar","unknown","mysterious","simple","complex","plain","fancy","expensive","cheap","valuable","worthless",
+  "old","older","oldest","new","newer","newest","young","younger","youngest","ancient","modern","future","past","present","former","current","temporary","permanent","early","late","recent","previous","next","final","main","primary","secondary","central","outer","inner","upper","lower","left","right","front","rear","back",
+  "wood","metal","stone","glass","plastic","leather","iron","steel","silver","gold","golden","bronze","black","white","grey","gray","red","blue","green","yellow","orange","purple","pink","brown","crimson","scarlet","violet","indigo","teal","cyan","magenta"
+].forEach(function(w){ LC_ORDINARY_STOPWORDS.add(w); });
+
+function lcIsOrdinaryStopword(value) {
+  var key = lcFold(String(value || "")).replace(/^[^a-z0-9à-öø-ÿ]+|[^a-z0-9à-öø-ÿ]+$/g, "");
+  return !!key && LC_ORDINARY_STOPWORDS.has(key);
+}
+
+function lcOrdinaryWordStats(name) {
+  var words = String(name || "").split(/\s+/).map(function(w){
+    return lcFold(w).replace(/^[^a-z0-9à-öø-ÿ]+|[^a-z0-9à-öø-ÿ]+$/g, "");
+  }).filter(Boolean);
+  var connectors = new Set(["the","a","an","of","and","or","with","in","on","at","for","from","to","de","da","del","la","le","van","von","der","di","du","al","bin","ibn"]);
+  var content = words.filter(function(w){ return !connectors.has(w); });
+  var ordinary = content.filter(function(w){
+    return lcIsOrdinaryStopword(w) || lcSetHasFolded(LC_COMMON_STARTERS,w) || lcSetHasFolded(LC_GENERIC_WORDS,w) || lcSetHasFolded(LC_TITLES,w);
+  }).length;
+  return { words:words, content:content, ordinary:ordinary, ratio:content.length ? ordinary/content.length : 1 };
+}
+
+function lcStrongNameGrammar(text,start,end,name) {
+  var source=String(text||""), ctx=lcFold(lcContextWindow(source,start,end,150));
+  var e=lcEscapeRegex(lcFold(name)), boundary=/[a-z0-9]$/.test(e)?"(?![a-z0-9])":"";
+  if(!e)return false;
+  var subject="(?:^|[^a-z0-9])"+e+boundary;
+  if(new RegExp(subject+"\\s*(?:"+LC_CHARACTER_ACTION_PATTERN+")\\b","i").test(ctx))return true;
+  if(new RegExp(subject+"\\s*(?:"+LC_ORG_ACTION_PATTERN+")\\b","i").test(ctx))return true;
+  var before=lcWordBefore(source,start), after=lcWordAfter(source,end);
+  if(LC_LOCATION_NOUNS.has(before)||LC_LOCATION_NOUNS.has(after)||LC_ITEM_NOUNS.has(before)||LC_ITEM_NOUNS.has(after)||LC_FACTION_NOUNS.has(before)||LC_FACTION_NOUNS.has(after))return true;
+  return false;
+}
+
+function lcOrdinaryNameBlocked(name,text,start,end,explicit,knownCandidate) {
+  if (knownCandidate || explicit) return false;
+  var s=lcOrdinaryWordStats(name);
+  if(!s.content.length)return true;
+  if(s.content.length===1 && s.ordinary===1)return true;
+  // Multi-word prose such as “Old Friend”, “The Next Morning” or “Heavy Rain”
+  // is rejected when it is made almost entirely of ordinary vocabulary.  A
+  // strong grammatical entity cue can still rescue a genuine named phrase.
+  if(s.content.length>=2 && (s.ordinary===s.content.length || s.ratio>=0.75)) {
+    if(!lcStrongNameGrammar(text,start,end,name))return true;
+  }
+  return false;
+}
+
 var LC_TITLES = new Set([
   "Mr","Mrs","Ms","Miss","Dr","Doctor","Professor","Prof","Sir","Lady","Lord","King","Queen","Prince",
   "Princess","Captain","Capt","Commander","General","Sergeant","Sgt","Officer","Detective","Agent",
@@ -283,7 +545,7 @@ function lcSpecificAlias(value, allowPrimary) {
   if (!n || n.length < 2 || n.indexOf("chronicle codex") === 0 || n.indexOf("living codex") === 0) return false;
   if (allowPrimary) return true;
   var words = clean.split(/\s+/).filter(Boolean);
-  if (words.length === 1 && (lcSetHasFolded(LC_COMMON_STARTERS, clean) || lcSetHasFolded(LC_GENERIC_WORDS, clean))) return false;
+  if (words.length === 1 && (lcSetHasFolded(LC_COMMON_STARTERS, clean) || lcSetHasFolded(LC_GENERIC_WORDS, clean) || lcIsOrdinaryStopword(clean))) return false;
   return !/^(?:the|a|an|he|she|they|it|you|we|i|this|that|these|those|someone|something)$/i.test(clean);
 }
 
@@ -776,7 +1038,7 @@ function lcConfigNotes() {
     "protectManual [true/false] — Freeze automatic refresh if you manually change a managed card's title, triggers, type or Entry.",
     "cardMax [300–2000] — Maximum generated card Entry length.",
     "",
-    "Detection reads actual adventure history, not injected model context. It filters sentence starters, generic nouns, control text and product-brand modifiers; handles possessives, titles, aliases and retries; accumulates type evidence across turns; requires word-boundary matches; and will not create a card while type confidence is unresolved.",
+    "Detection reads actual adventure history, not injected model context. Its ordinary-word shield contains 2,400+ inherited and expanded stopwords/generic terms spanning function words, dialogue verbs, narration openers, descriptors, body/scene nouns, food, weather, time/calendar language, roles, UI/meta vocabulary and common actions. Contextual sentence-start and product-brand guards catch cases a finite list cannot. Explicit naming language can still establish an intentionally unusual proper name. It also handles possessives, titles, aliases and retries, accumulates type evidence across turns, requires word-boundary matches, and will not create a card while type confidence is unresolved.",
     "",
     "━━━━━━━━━━ LIVING PLOT MEMORY ━━━━━━━━━━",
     "plotEssentials [true/false] — Maintain a generated continuity segment in live Plot Essentials.",
@@ -1541,22 +1803,28 @@ function lcCandidateIsJunk(name, text, start, end) {
   if (/[’'](?:re|ve|ll|d|m|t)$/i.test(clean)) return true;
   var words = clean.split(/\s+/).filter(Boolean);
   if (!words.length || words.length > 6) return true;
-  var context = lcContextWindow(text, start, end, 120), explicit = lcExplicitNamingCue(context, clean);
-  if (words.length === 1 && lcSetHasFolded(LC_COMMON_STARTERS, clean)) return true;
-  if (words.length === 1 && lcSetHasFolded(LC_GENERIC_WORDS, clean) && !explicit) return true;
-  if (words.length === 1 && lcSetHasFolded(LC_TITLES, clean.replace(/\.$/, ""))) return true;
-  if (words.length > 1 && words.every(function(w){ return lcSetHasFolded(LC_COMMON_STARTERS,w) || lcSetHasFolded(LC_GENERIC_WORDS,w); }) && !explicit) return true;
+
+  // Platform/control vocabulary is never allowed to bootstrap itself into lore.
+  if (/^(?:CHRONICLE CODEX|LIVING CODEX|Plot Essentials|Author'?s Note|Character Current|Story Cards?|AI Instructions?|Recent Story|System|Assistant|User|Player|Dungeon Master)$/i.test(clean)) return true;
+  if (/^__?(?:chronicle|living)_codex_/i.test(clean)) return true;
+
+  var context = lcContextWindow(text, start, end, 140), explicit = lcExplicitNamingCue(context, clean);
+  var knownResolved = lcResolveAliasKey(clean), lc = lcEnsureState();
+  var knownCandidate = !!lc.candidates[knownResolved] || lcFindCardForEntity(clean).length > 0;
+
+  if (words.length === 1 && lcSetHasFolded(LC_TITLES, clean.replace(/\.$/, "")) && !knownCandidate) return true;
   if (/^\d+$/.test(clean) || /^(?:You|He|She|They|We|I|It|Someone|Something|Everyone|Nobody|Nothing|This|That|These|Those)$/i.test(clean)) return true;
-  if (/^(?:CHRONICLE CODEX|Plot Essentials|Author'?s Note|Character Current)$/i.test(clean)) return true;
+  if (lcOrdinaryNameBlocked(clean, text, start, end, explicit, knownCandidate)) return true;
   if (lcBrandModifierOnly(text, start, end, clean)) return true;
 
-  var before = String(text || "").slice(Math.max(0,start-8), start);
-  var atSentenceStart = start === 0 || /[.!?][\"'”’)]?\s*$/.test(before) || /\n\s*$/.test(before);
-  var knownResolved = lcResolveAliasKey(clean), knownCandidate = !!lcEnsureState().candidates[knownResolved];
+  // Sentence-initial capitalization is grammar, not evidence of a name.  This
+  // catches verbs/adjectives that no finite stopword list can enumerate.
+  var before = String(text || "").slice(Math.max(0,start-12), start);
+  var atSentenceStart = start === 0 || /(?:^|[.!?][\"'”’)]?|\n)\s*[\"'“‘(\[]?\s*$/.test(before);
   if (atSentenceStart && words.length === 1 && !knownCandidate && !explicit) {
     var after = lcWordAfter(text,end);
     if (!LC_LOCATION_NOUNS.has(after) && !LC_ITEM_NOUNS.has(after) && !LC_FACTION_NOUNS.has(after)) {
-      var local = lcFold(lcContextWindow(text,start,end,100)), e = lcEscapeRegex(lcFold(clean));
+      var local = lcFold(lcContextWindow(text,start,end,110)), e = lcEscapeRegex(lcFold(clean));
       var boundary = /[a-z0-9]$/.test(e) ? "(?![a-z0-9])" : "";
       var directPerson = new RegExp("(?:^|[^a-z0-9])"+e+boundary+"\\s*(?:"+LC_CHARACTER_ACTION_PATTERN+")\\b","i").test(local);
       var directOrg = new RegExp("(?:^|[^a-z0-9])"+e+boundary+"\\s*(?:"+LC_ORG_ACTION_PATTERN+")\\b","i").test(local);
@@ -1565,7 +1833,6 @@ function lcCandidateIsJunk(name, text, start, end) {
   }
   return false;
 }
-
 
 
 function lcTypeVotes(text, start, end, name) {
@@ -2601,6 +2868,7 @@ function lcStatusText(cfg) {
     "Action: " + count + " | Master: " + cfg.master,
     lc.lastNotice ? "Last notice: " + lc.lastNotice : "",
     "Codex: " + cfg.codex + " | create " + cfg.codexCreate + " | refresh " + cfg.codexRefresh,
+    "Ordinary-word shield: " + LC_ORDINARY_STOPWORDS.size + "+ terms + contextual sentence-start/generic guards",
     "Types: characters " + cfg.trackCharacters + " | locations " + cfg.trackLocations + " | items " + cfg.trackItems + " | factions " + cfg.trackFactions,
     "Pending candidates: " + pending.length + " | managed cards: " + managed.length + " | protected " + protectedCount + " | missing " + missingCount,
     "Created: " + (lc.stats.cardsCreated||0) + " | refreshed: " + (lc.stats.cardsRefreshed||0) + " | manual protections: " + (lc.stats.manualProtections||0),
