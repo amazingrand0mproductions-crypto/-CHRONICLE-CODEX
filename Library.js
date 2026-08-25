@@ -34,7 +34,7 @@ var LC_LEGACY_DATA_OPEN = "<LIVING_CODEX_DATA>";
 var LC_LEGACY_DATA_CLOSE = "</LIVING_CODEX_DATA>";
 var LC_LEGACY_INTERNAL_PREFIX = "__living_codex_";
 var LC_LEGACY_STATE_KEY = "livingCodex";
-var LC_STATE_REVISION = 12;
+var LC_STATE_REVISION = 13;
 var LC_NEW_CARD_PREFIX = "__chronicle_codex_new_";
 var LC_RUNTIME = {
   pass: 0,
@@ -3312,6 +3312,37 @@ var LC_ITEM_NOUNS = new Set([
   "bag","box","letter","document","file","badge","uniform","jacket","watch","camera","crown","staff","wand","food","meal","dish","drink","beverage","burger","handheld","console","controller","headset","smartwatch"
 ]);
 
+// Vehicle is a semantic subtype of Item. Internally it shares Item tracking so
+// existing configs and managed-card state stay compatible, but Story Cards may
+// use the more precise visible type "Vehicle" when transport evidence is strong.
+var LC_VEHICLE_NOUNS = new Set([
+  "vehicle","car","automobile","auto","truck","van","suv","sedan","coupe","roadster","convertible",
+  "limousine","limo","jeep","humvee","taxi","cab","bus","coach","ambulance","firetruck","fire-engine",
+  "motorcycle","motorbike","bike","bicycle","scooter","moped","quad","atv","buggy","rover","kart",
+  "tank","apc","carrier","chariot","wagon","carriage","cart","sled","sleigh","snowmobile","bookmobile",
+  "train","locomotive","tram","subway","metro","monorail","railcar","ship","boat","yacht","submarine",
+  "submersible","ferry","canoe","kayak","dinghy","barge","sailboat","speedboat","hovercraft",
+  "aircraft","airplane","aeroplane","plane","jet","fighter","bomber","helicopter","chopper","gyrocopter",
+  "shuttle","spacecraft","spaceship","starship","cruiser","speeder","hoverbike","dropship","gunship"
+]);
+
+var LC_VEHICLE_COMPONENTS = new Set([
+  "engine","motor","wheel","wheels","tire","tires","tyre","tyres","cockpit","dashboard","steering",
+  "brake","brakes","accelerator","chassis","hood","bonnet","trunk","boot","windshield","windscreen",
+  "headlight","headlights","seat","seats","exhaust","thruster","thrusters","wing","wings","rotor","rotors",
+  "propeller","propellers","landing-gear","hull","deck","sail","sails","mast","rudder","gearbox","transmission"
+]);
+
+var LC_VEHICLE_ACTIONS = [
+  "accelerates","accelerated","brakes","braked","skids","skidded","swerves","swerved","speeds","sped",
+  "races","raced","roars","roared","idles","idled","parks","parked","cruises","cruised","rolls","rolled",
+  "drives","drove","flies","flew","lands","landed","takes off","took off","docks","docked","sails","sailed",
+  "pulls up","pulled up","powers up","powered up","starts","started","stalls","stalled"
+];
+var LC_VEHICLE_ACTION_PATTERN = LC_VEHICLE_ACTIONS.map(lcEscapeRegex).sort(function(a,b){return b.length-a.length;}).join("|");
+var LC_VEHICLE_NOUN_PATTERN = Array.from(LC_VEHICLE_NOUNS).map(lcEscapeRegex).sort(function(a,b){return b.length-a.length;}).join("|");
+var LC_VEHICLE_COMPONENT_PATTERN = Array.from(LC_VEHICLE_COMPONENTS).map(lcEscapeRegex).sort(function(a,b){return b.length-a.length;}).join("|");
+
 var LC_FACTION_NOUNS = new Set([
   "company","corporation","corp","inc","agency","department","government","council","guild","order","gang",
   "family","clan","tribe","army","military","police","team","club","group","faction","organization",
@@ -3855,7 +3886,7 @@ function lcEnsureState() {
   if (typeof lc.lastMessage !== "string") lc.lastMessage = "";
   if (typeof lc.taskSeq !== "number" || !isFinite(lc.taskSeq) || lc.taskSeq < 0) lc.taskSeq = 0;
   ["lastCreateTurn","lastRefreshTurn"].forEach(function(k){ if (typeof lc[k] !== "number" || !isFinite(lc[k])) lc[k] = -9999; });
-  ["lastPlotCheck","lastAuthorCheck","lastCompassCheck","lastCurrentCheck","lastMemoryUpdate","lastAuthorUpdate","lastCompassUpdate","lastCurrentUpdate","taskBackoffUntil"].forEach(function(k){
+  ["lastPlotCheck","lastAuthorCheck","lastCompassCheck","lastCurrentCheck","lastMemoryUpdate","lastAuthorUpdate","lastCompassUpdate","lastCurrentUpdate","taskBackoffUntil","lastAutoTaskTurn"].forEach(function(k){
     if (typeof lc[k] !== "number" || !isFinite(lc[k]) || lc[k] < 0) lc[k] = 0;
   });
   if (typeof lc.taskMisses !== "number" || !isFinite(lc.taskMisses) || lc.taskMisses < 0) lc.taskMisses = 0;
@@ -3957,7 +3988,7 @@ function lcConfigNotes() {
     "codex [true/false] — Master switch for automatic Story Card intelligence.",
     "codexCreate [true/false] — Allow new cards to be created after evidence gates pass.",
     "codexRefresh [true/false] — Allow managed cards to be refreshed when material new canon accumulates.",
-    "trackCharacters / trackLocations / trackItems / trackFactions [true/false] — Independently enable each detected card type.",
+    "trackCharacters / trackLocations / trackItems / trackFactions [true/false] — Independently enable each detected card family. Vehicles are a semantic subtype of Item, so trackItems also controls Vehicle cards.",
     "adoptLegacy [true/false] — One-time adoption of compatible Codex cards from older split builds.",
     "adoptManaged [true/false] — Re-link Story Cards previously created by CHRONICLE CODEX if script state was reset but the cards remain.",
     "mentions [1–20] — Evidence observations required before automatic creation.",
@@ -4497,6 +4528,7 @@ function lcMarkManaged(card, kind, legacy) {
   meta.title = card.title;
   if (card.id != null) meta.cardId = card.id;
   meta.kind = kind;
+  if (kind === "item") meta.subtype = lcNorm(card.type||"") === "vehicle" ? "vehicle" : (meta.subtype || "item");
   if (typeof meta.createdTurn !== "number" || !isFinite(meta.createdTurn)) meta.createdTurn = lcCurrentActionCount();
   if (typeof meta.lastRefreshTurn !== "number" || !isFinite(meta.lastRefreshTurn)) meta.lastRefreshTurn = lcCurrentActionCount();
   if (typeof meta.missingSince !== "number" || !isFinite(meta.missingSince)) meta.missingSince = 0;
@@ -4791,6 +4823,52 @@ function lcCanonicalCandidateName(raw) {
 
 
 
+function lcVehicleEvidenceScore(text, start, end, name) {
+  var source=String(text||""), clean=lcClean(name,80), foldedName=lcFold(clean);
+  if(!clean) return 0;
+  var score=0, ctx=lcFold(lcContextWindow(source,start,end,210)), e=lcEscapeRegex(foldedName);
+  var boundary=/[a-z0-9]$/.test(e)?"(?![a-z0-9])":"", subject="(?:^|[^a-z0-9])"+e+boundary;
+  var words=foldedName.replace(/\./g,"").split(/\s+/).filter(Boolean), first=words[0]||"", last=words[words.length-1]||"";
+  if(LC_VEHICLE_NOUNS.has(first)||LC_VEHICLE_NOUNS.has(last)) score+=7;
+  // Productive vehicle-name suffixes catch names such as Batmobile without a
+  // hard-coded franchise dictionary. They only matter once the token already
+  // looks like a proper-name candidate.
+  if(words.length===1 && /(?:mobile|craft)$/i.test(clean) && clean.length>=6) score+=5;
+  var afterClause=lcFold(source.slice(end,Math.min(source.length,end+170)));
+  if(new RegExp("^(?:\\s*(?:is|was|became|becomes|remains)\\s+(?:an?|the)?\\s*|\\s*,\\s*(?:an?|the)?\\s*)(?:[a-z-]+\\s+){0,2}(?:"+LC_VEHICLE_NOUN_PATTERN+")\\b","i").test(afterClause)) score+=8;
+  if(new RegExp(subject+"\\s*(?:"+LC_VEHICLE_ACTION_PATTERN+")\\b","i").test(ctx)) score+=6;
+  if(new RegExp(subject+"\\s*(?:'s|’s)\\s+(?:"+LC_VEHICLE_COMPONENT_PATTERN+")\\b","i").test(ctx)) score+=6;
+  if(new RegExp("\\b(?:drive(?:s|n)?|drove|driving|ride(?:s|n)?|rode|riding|park(?:s|ed|ing)?|board(?:s|ed|ing)?|enter(?:s|ed|ing)?|exit(?:s|ed|ing)?|get(?:s)? into|got into|climb(?:s|ed|ing)? into|jump(?:s|ed|ing)? into|step(?:s|ped|ping)? into)\\s+(?:(?:the|an?)\\s+)?"+e+boundary,"i").test(ctx)) score+=7;
+  if(new RegExp("(?:^|[^a-z0-9])"+e+boundary+".{0,55}\\b(?:engine|wheels?|tires?|tyres?|cockpit|dashboard|headlights?|thrusters?|chassis|windshield|hull|rotors?)\\b","i").test(ctx)) score+=4;
+  return Math.min(14,score);
+}
+
+function lcVehicleSubtypeEvidence(name, evidence) {
+  var n=lcClean(name,80); if(!n) return 0;
+  var score=0, rows=Array.isArray(evidence)?evidence:[evidence];
+  if(/(?:mobile|craft)$/i.test(n)&&n.indexOf(" ")===-1&&n.length>=6) score+=5;
+  rows.filter(Boolean).forEach(function(raw){
+    var text=String(raw||""), folded=lcFold(text), needle=lcFold(n), from=0, localBest=0;
+    while(needle && (from=folded.indexOf(needle,from))!==-1){
+      localBest=Math.max(localBest,lcVehicleEvidenceScore(text,from,from+needle.length,n)); from+=Math.max(1,needle.length);
+    }
+    if(!localBest && new RegExp("\\b(?:"+LC_VEHICLE_NOUN_PATTERN+")\\b","i").test(folded) && lcContainsPhrase(text,n)) localBest=3;
+    score+=Math.min(8,localBest);
+  });
+  return Math.min(24,score);
+}
+
+function lcInferItemSubtype(name, evidence, existingType) {
+  var t=lcNorm(existingType||"");
+  if(t==="vehicle"||t==="vehicles") return "vehicle";
+  return lcVehicleSubtypeEvidence(name,evidence)>=5 ? "vehicle" : "item";
+}
+
+function lcVisibleCardType(kind, name, evidence, existingType) {
+  if(kind==="item" && lcInferItemSubtype(name,evidence,existingType)==="vehicle") return "Vehicle";
+  return LC_TYPE_NAMES[kind]||"Item";
+}
+
 function lcCandidateIsJunk(name, text, start, end) {
   var clean = lcCanonicalCandidateName(name);
   if (!clean || clean.length < 2 || clean.length > 80) return true;
@@ -4828,7 +4906,8 @@ function lcCandidateIsJunk(name, text, start, end) {
       var boundary = /[a-z0-9]$/.test(e) ? "(?![a-z0-9])" : "";
       var directPerson = new RegExp("(?:^|[^a-z0-9])"+e+boundary+"\\s*(?:"+LC_CHARACTER_ACTION_PATTERN+")\\b","i").test(local);
       var directOrg = new RegExp("(?:^|[^a-z0-9])"+e+boundary+"\\s*(?:"+LC_ORG_ACTION_PATTERN+")\\b","i").test(local);
-      if (!directPerson && !directOrg) return true;
+      var directVehicle = lcVehicleEvidenceScore(text,start,end,clean) >= 5;
+      if (!directPerson && !directOrg && !directVehicle) return true;
     }
   }
   return false;
@@ -4844,6 +4923,8 @@ function lcTypeVotes(text, start, end, name) {
 
   if (LC_LOCATION_NOUNS.has(first) || LC_LOCATION_NOUNS.has(last)) votes.location += 5;
   if (LC_ITEM_NOUNS.has(first) || LC_ITEM_NOUNS.has(last)) votes.item += 5;
+  var vehicleScore = lcVehicleEvidenceScore(source,start,end,name);
+  if (vehicleScore) votes.item += Math.min(8, Math.max(3, vehicleScore));
   if (LC_FACTION_NOUNS.has(first) || LC_FACTION_NOUNS.has(last)) votes.faction += 5;
   if (words.length > 1 && LC_VENUE_SUFFIXES.has(last)) votes.location += 6;
   if (/^(?:corp|corporation|inc|ltd|llc|group|foundation|industries|enterprises|syndicate|council|guild|order|agency|labs|laboratories)$/.test(last)) votes.faction += 7;
@@ -4869,7 +4950,8 @@ function lcTypeVotes(text, start, end, name) {
   if (new RegExp(subject + ".{0,65}\\b(?:located|stands|lies|situated|district|street|building|room|city|town|village|bookstore|hotel|cafe|restaurant|hospital|school)\\b","i").test(ctx)) votes.location += 3;
 
   if (LC_ITEM_NOUNS.has(before) || LC_ITEM_NOUNS.has(after)) votes.item += 4;
-  if (new RegExp("\\b(?:holds?|held|wears?|wore|carries|carried|picks? up|picked up|uses?|used|opens?|opened|draws?|drew|equips?|equipped|drops?|dropped|activates?|activated|drinks?|drank|eats?|ate|drives?|drove|rides?|rode)\\s+(?:(?:the|an?)\\s+)?" + e + boundary,"i").test(ctx)) votes.item += 6;
+  if (new RegExp("\\b(?:holds?|held|wears?|wore|carries|carried|picks? up|picked up|uses?|used|opens?|opened|draws?|drew|equips?|equipped|drops?|dropped|activates?|activated|drinks?|drank|eats?|ate|drives?|drove|rides?|rode|boards?|boarded|parks?|parked|gets? into|got into|climbs? into|climbed into|jumps? into|jumped into)\\s+(?:(?:the|an?)\\s+)?" + e + boundary,"i").test(ctx)) votes.item += 6;
+  if (vehicleScore >= 5) votes.character = Math.max(0, votes.character - 3);
 
   if (LC_FACTION_NOUNS.has(before) || LC_FACTION_NOUNS.has(after)) votes.faction += 4;
   if (new RegExp("\\b(?:joined|works for|worked for|belongs to|member of|agents of|leader of|founded|employed by|recruited by|serves|served)\\s+(?:the\\s+)?" + e + boundary,"i").test(ctx)) votes.faction += 6;
@@ -4920,6 +5002,14 @@ function lcExtractNamedCandidates(text) {
 
   function push(raw, start, end, forcedCharacter, explicitOverride) {
     raw = lcCanonicalCandidateName(raw);
+    // Article-prefixed vehicle mentions are grammatical, not usually part of
+    // the vehicle's proper name: "the Batmobile" should resolve to Batmobile.
+    // Use transport evidence rather than globally stripping two-word "The X"
+    // names, preserving legitimate places such as The Hague.
+    if (/^The\s+/i.test(raw)) {
+      var articleless=lcClean(raw.replace(/^The\s+/i,""),80),shift=Math.max(0,raw.length-articleless.length);
+      if (articleless && lcVehicleEvidenceScore(source,start+shift,end,articleless)>=5) { raw=articleless; start+=shift; }
+    }
     if (!raw || lcCandidateIsJunk(raw, source, start, end)) return;
     var key = lcNorm(raw);
     if (!key) return;
@@ -5531,25 +5621,29 @@ function lcCompassVerifiedTurn(compass) {
   return isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
-function lcRecentScenePivotScore(cfg) {
-  var actions = lcExtractHistoryWindow(cfg).slice(-3), score = 0;
-  actions.forEach(function(a, idx) {
-    var t = String(a && a.text || "");
-    if (!t) return;
-    if (/\b(?:instead|change(?:s|d)? (?:course|direction|subject)|move(?:s|d)? on|walk(?:s|ed)? away|leave(?:s|d)?|head(?:s|ed)? (?:to|toward|towards)|go(?:es|ne|ing)? (?:to|back|elsewhere)|return(?:s|ed)? to|later that|hours later|the next (?:day|morning|night)|elsewhere|meanwhile)\b/i.test(t)) score += idx === actions.length - 1 ? 2 : 1;
-    if (/\b(?:new plan|different plan|forget that|ignore that|drop it|not now|another matter|something else)\b/i.test(t)) score += 2;
+function lcRecentScenePivotInfo(cfg) {
+  var actions=lcExtractHistoryWindow(cfg).slice(-4), score=0, latestTurn=0, strongestTurn=0;
+  actions.forEach(function(a,idx){
+    var t=String(a&&a.text||""),local=0;if(!t)return;
+    if(/\b(?:instead|change(?:s|d)? (?:course|direction|subject)|move(?:s|d)? on|walk(?:s|ed)? away|leave(?:s|d)?|head(?:s|ed)? (?:to|toward|towards)|go(?:es|ne|ing)? (?:to|back|elsewhere)|return(?:s|ed)? to|later that|hours later|the next (?:day|morning|night)|elsewhere|meanwhile)\b/i.test(t))local+=idx===actions.length-1?2:1;
+    if(/\b(?:new plan|different plan|forget that|ignore that|drop it|not now|another matter|something else|change of plan|we'?re going|i'?m going|let'?s go|take me to)\b/i.test(t))local+=2;
+    if(local){score+=local;latestTurn=Math.max(latestTurn,Number(a.count||0));if(local>=2)strongestTurn=Math.max(strongestTurn,Number(a.count||0));}
   });
-  return Math.min(4, score);
+  return {score:Math.min(4,score),latestTurn:latestTurn,strongestTurn:strongestTurn};
 }
+
+function lcRecentScenePivotScore(cfg) { return lcRecentScenePivotInfo(cfg).score; }
 
 function lcCompassRuntimeRank(cfg, compass) {
   var c = compass && typeof compass === "object" ? compass : {}, rank = lcCompassStrengthRank(cfg && cfg.compassStrength), now = lcCurrentActionCount();
   if (!cfg || !cfg.adaptiveGuidance) return rank;
   var drift = lcNorm(c.drift || "low"), verified = lcCompassVerifiedTurn(c), age = verified ? Math.max(0, now - verified) : cfg.compassExpiry;
-  if (drift === "high") rank++;
+  var pivotInfo=lcRecentScenePivotInfo(cfg),pivotAfterCompass=!!(pivotInfo.latestTurn&&pivotInfo.latestTurn>verified);
+  if (drift === "high" && !pivotAfterCompass) rank++;
   if (cfg.sceneBreathing && drift === "low" && !lcClean(c.pressure, 20)) rank--;
   if (age > Math.max(2, Math.floor(cfg.compassExpiry * 0.60))) rank--;
-  if (lcRecentScenePivotScore(cfg) >= 2) rank--;
+  if (pivotInfo.score >= 2) rank--;
+  if (pivotAfterCompass && cfg.allowOrganicDetours) rank=1;
   return Math.max(1, Math.min(3, rank));
 }
 
@@ -5559,7 +5653,9 @@ function lcEffectiveCompassInterval(cfg) {
   var lc = lcEnsureState(), c = lc.compass || {}, drift = lcNorm(c.drift || ""), verified = lcCompassVerifiedTurn(c), now = lcCurrentActionCount(), interval = base;
   if (drift === "high") interval = Math.max(2, base - 1);
   else if (drift === "low" && verified && now - verified < Math.max(2, Math.floor(cfg.compassExpiry * 0.45))) interval = Math.min(30, base + (cfg.sceneBreathing ? 2 : 1));
-  if (lcRecentScenePivotScore(cfg) > 0) interval = Math.max(2, Math.min(interval, base - 1));
+  var pivotInfo=lcRecentScenePivotInfo(cfg);
+  if (pivotInfo.score > 0) interval = Math.max(2, Math.min(interval, base - 1));
+  if (pivotInfo.latestTurn && pivotInfo.latestTurn > verified) interval = 2;
   if (verified && now - verified >= Math.max(2, cfg.compassExpiry - 2)) interval = 2;
   return interval;
 }
@@ -5628,20 +5724,21 @@ function lcBuildContinuityPulse(cfg, includeCompass, includeCurrent) {
   if (!cfg || !cfg.master) return "";
   var lc = lcEnsureState(), c = lc.compass || {}, now = lcCurrentActionCount(), rows = [], rank = lcCompassRuntimeRank(cfg, c);
   var verified = lcCompassVerifiedTurn(c), compassFresh = !!(cfg.narrativeCompass && verified && now - verified <= cfg.compassExpiry);
-  var drift = lcNorm(c.drift || "low"), breathing = !!(cfg.sceneBreathing && drift === "low" && rank <= 2), pivot = lcRecentScenePivotScore(cfg);
+  var drift = lcNorm(c.drift || "low"), pivotInfo=lcRecentScenePivotInfo(cfg), pivot=pivotInfo.score, pivotAfterCompass=!!(pivotInfo.latestTurn&&pivotInfo.latestTurn>verified);
+  var breathing = !!(cfg.sceneBreathing && drift === "low" && rank <= 2), staleDirection=!!(pivotAfterCompass&&cfg.allowOrganicDetours);
 
   if (includeCompass && compassFresh) {
-    if (cfg.sceneObjectives && c.objective) rows.push({priority:100,source:"compass",text:"Objective — "+lcClean(c.objective,190)});
-    if (c.pressure) rows.push({priority:98,source:"compass",text:"Live pressure — "+lcClean(c.pressure,190)});
+    if (!staleDirection && cfg.sceneObjectives && c.objective && !(breathing&&rank===1)) rows.push({priority:100,source:"compass",text:"Objective — "+lcClean(c.objective,190)});
+    if (!staleDirection && c.pressure && !(breathing&&rank===1&&!lcClean(c.guard,20))) rows.push({priority:98,source:"compass",text:"Live pressure — "+lcClean(c.pressure,190)});
     if (cfg.continuityAnchors && Array.isArray(c.anchors)) {
-      var anchorLimit = rank >= 3 ? 3 : (breathing ? 1 : 2);
+      var anchorLimit = staleDirection ? 1 : (rank >= 3 ? 3 : (breathing ? 1 : 2));
       c.anchors.slice(0,anchorLimit).forEach(function(x,i){ x=lcClean(x,165); if(x)rows.push({priority:92-i,source:"compass",text:"Continuity — "+x}); });
     }
-    if (cfg.npcIntentGuidance && Array.isArray(c.intents) && !breathing) {
+    if (!staleDirection && cfg.npcIntentGuidance && Array.isArray(c.intents) && !breathing) {
       c.intents.slice(0,rank>=3?2:1).forEach(function(x,i){ x=lcClean(x,165); if(x)rows.push({priority:82-i,source:"compass",text:"NPC direction — "+x}); });
     }
-    if (c.momentum) rows.push({priority:78,source:"compass",text:"Momentum — "+lcClean(c.momentum,130)});
-    if (cfg.driftGuard && c.guard && (drift !== "low" || rank >= 3)) rows.push({priority:96,source:"compass",text:"Drift guard — "+lcClean(c.guard,185)});
+    if (!staleDirection && c.momentum && !(breathing&&rank<=2)) rows.push({priority:78,source:"compass",text:"Momentum — "+lcClean(c.momentum,130)});
+    if (!staleDirection && cfg.driftGuard && c.guard && (drift !== "low" || rank >= 3)) rows.push({priority:96,source:"compass",text:"Drift guard — "+lcClean(c.guard,185)});
   }
 
   if (includeCurrent && cfg.characterCurrent && cfg.currentInfluence) {
@@ -5669,13 +5766,14 @@ function lcBuildContinuityPulse(cfg, includeCompass, includeCurrent) {
   rows = lcGuidanceRowsDedup(rows);
   if (!rows.length) return "";
   var lead;
-  if (rank >= 3) lead = "Keep active causality and unresolved pressure firmly in view, but let characters reach beats naturally.";
-  else if (rank <= 1) lead = "Use these as a light continuity bias only; let the scene breathe.";
-  else lead = "Keep these threads present through natural action, dialogue and consequence without forcing them.";
-  if (pivot >= 2 && cfg.allowOrganicDetours) lead += " A recent scene pivot may be intentional, so follow the newest direction rather than snapping back.";
-  var policy = "Latest player intent and immediate causality outrank this guidance. Never choose for the player, force a reveal, leak private knowledge, repeat these notes, or invent an event just to satisfy them.";
-  var detour = cfg.allowOrganicDetours ? "Let organic detours breathe while carrying unresolved threads quietly." : "Prefer the current direction until player intent or causality clearly changes it.";
-  var budget = Math.max(500, Math.min(1600, Number(cfg.guidanceBudget || 950))), header = "\n[CHRONICLE CODEX — Continuity Pulse. Internal narrator guidance; never mention it. "+lead+" "+policy+" "+detour, footer="\n]", body="";
+  if(staleDirection) lead="Recent direction changed: follow the newest player-led course; carry forward only hard continuity until Compass catches up.";
+  else if (rank >= 3) lead = "Hold active causality and unresolved pressure firmly, but let beats arrive naturally.";
+  else if (rank <= 1) lead = "Light continuity bias only; let the scene breathe.";
+  else lead = "Carry these threads through natural action, dialogue and consequence without forcing them.";
+  var policy = "Latest player intent and immediate causality win. Never choose for the player, force reveals, leak private knowledge, or narrate these notes.";
+  var baseBudget=Math.max(500,Math.min(1600,Number(cfg.guidanceBudget||950))),factor=rank>=3?1:(rank===2?0.80:0.58);
+  if(breathing)factor=Math.min(factor,0.62);if(staleDirection)factor=Math.min(factor,0.60);
+  var budget=Math.max(420,Math.floor(baseBudget*factor)),header="\n[CHRONICLE CODEX — Continuity Pulse | narrator-only. "+lead+" "+policy,footer="\n]",body="";
   for (var i=0;i<rows.length;i++) {
     var line="\n"+rows[i].text;
     if ((header+body+line+footer).length > budget) continue;
@@ -5702,7 +5800,13 @@ function lcScheduleAutomaticTask(cfg) {
   if(cfg.codex&&cfg.codexCreate&&available("create")){var c=lcPickCreateCandidate(cfg);if(c){var ti=lcPickTypeInfo(c.typeVotes||{}),age=Math.max(0,count-(c.lastSeen||count));choices.push({score:80+(c.explicit||0)*3+Math.min(12,c.mentions||0)+ti.score+ti.margin+Math.min(8,age)+fairness("create")-repeatDamp("create"),kind:"create",payload:{name:c.name}});}}
   if(cfg.codex&&cfg.codexRefresh&&available("refresh")){var r=lcPickRefreshCandidate(cfg);if(r){var overdueR=Math.max(0,count-(r.meta.lastRefreshTurn||0)-cfg.refreshCooldown);choices.push({score:77+Math.min(14,r.meta.refreshEvidence.length*2)+Math.min(18,Math.floor(overdueR/3))+fairness("refresh")-repeatDamp("refresh"),kind:"refresh",payload:{name:r.card.title||r.meta.title}});}}
   if(cfg.characterCurrent&&count-(lc.lastCurrentCheck||0)>=cfg.currentEvery&&available("current")){var target=lcPickCurrentTarget(cfg,null);if(!target)lc.lastCurrentCheck=count;else{var cs=typeof target.changeScore==="number"?target.changeScore:0;if(cs>=cfg.currentSensitivity)choices.push({score:70+cs+Math.min(30,(target.overdue||0)*2)+fairness("current")-repeatDamp("current"),kind:"current",payload:{name:target.name}});else lc.lastCurrentCheck=count;}}
-  if(!choices.length)return null;choices.sort(function(a,b){return b.score-a.score;});var win=choices[0];return lcMakeTask(win.kind,win.payload,false);
+  if(!choices.length)return null;choices.sort(function(a,b){return b.score-a.score;});var win=choices[0];
+  // Do not make every generation carry maintenance bureaucracy. A single quiet
+  // story turn between ordinary automatic workers noticeably reduces context
+  // pressure. Truly urgent Compass drift/pivots or heavily overdue work can pass.
+  var autoGap=count-Number(lc.lastAutoTaskTurn||0),urgent=win.score>=112||win.kind==="compass"&&(lcRecentScenePivotScore(cfg)>=2||lcNorm(lc.compass&&lc.compass.drift||"")==="high");
+  if(autoGap<=1&&!urgent)return null;
+  return lcMakeTask(win.kind,win.payload,false);
 }
 
 
@@ -5756,11 +5860,11 @@ function lcBuildTaskInstruction(task,cfg) {
       "Established aliases/candidate forms: "+(c&&c.aliases&&c.aliases.length?c.aliases.join(", "):"(none beyond the title)"),
       "Quoted story evidence:",
       evidence.map(function(e){return "- "+e;}).join("\n") || "- No automatic evidence; this was manually forced.",
-      "Reject the card if the apparent name is actually prose, a generic noun, a product modifier, an unsupported alias, or if the evidence cannot establish one of Character/Location/Item/Faction.",
+      "Reject the card if the apparent name is actually prose, a generic noun, a product modifier, an unsupported alias, or if the evidence cannot establish Character/Location/Item/Vehicle/Faction. Vehicle is a transport subtype of Item; use it for named cars, bikes, ships, aircraft, spacecraft and other conveyances when evidence supports that role.",
       "The Story Card title itself is not reliable model context, so the Entry MUST explicitly name \""+p.name+"\" near its beginning.",
       "Triggers must be specific established names/aliases only—never pronouns, roles such as 'the doctor', or generic nouns.",
       "Return update schema:",
-      LC_DATA_OPEN+"{\"task\":\""+task.id+"\",\"nonce\":\""+task.nonce+"\",\"status\":\"update\",\"card\":{\"title\":\""+p.name.replace(/"/g,"")+"\",\"type\":\"Character|Location|Item|Faction\",\"keys\":\"comma, separated, specific triggers\",\"entry\":\"concise established facts only\"}}"+LC_DATA_CLOSE,
+      LC_DATA_OPEN+"{\"task\":\""+task.id+"\",\"nonce\":\""+task.nonce+"\",\"status\":\"update\",\"card\":{\"title\":\""+p.name.replace(/"/g,"")+"\",\"type\":\"Character|Location|Item|Vehicle|Faction\",\"keys\":\"comma, separated, specific triggers\",\"entry\":\"concise established facts only\"}}"+LC_DATA_CLOSE,
       "Otherwise return "+LC_DATA_OPEN+"{\"task\":\""+task.id+"\",\"nonce\":\""+task.nonce+"\",\"status\":\"skip\"}"+LC_DATA_CLOSE+". Use 2-7 compact factual sentences/bullets, max "+cfg.cardMax+" characters. Do not predict future events."
     );
   } else if (task.kind === "refresh") {
@@ -5987,9 +6091,10 @@ function lcProcessCreate(task,data,cfg) {
   if(status!=="update"||!data.card||typeof data.card!=="object"||Array.isArray(data.card))return{ok:false,error:"invalid create payload"};
   var cdata=data.card,title=lcClean(cdata.title||name,80);if(lcNorm(title)!==lcNorm(name))return{ok:false,error:"model returned a different entity title"};if(lcFindCardForEntity(name).length)return{ok:true,changed:false};
   var ck=lcResolveAliasKey(name),c=lc.candidates[ck],detected=c&&lcTypeConfident(c.typeVotes||{},cfg)?lcPickType(c.typeVotes||{}):null,modelKind=lcTypeKeyFromModel(cdata.type),kind=detected||modelKind;if(!kind||!lcTypeAllowed(kind,cfg))return{ok:false,error:"entity type is disabled or unresolved"};if(detected&&modelKind&&detected!==modelKind){var info2=lcPickTypeInfo(c.typeVotes||{});kind=(info2.margin>=2||cfg.detectionStrictness>=2)?detected:modelKind;}if(!lcTypeAllowed(kind,cfg))return{ok:false,error:"detected entity type is disabled"};
-  var canonicalName=(c&&c.name)||name,entry=lcEnsureEntityNamedInEntry(canonicalName,cdata.entry,cfg.cardMax);if(entry.length<30)return{ok:false,error:"generated card entry was too small"};var unsupported=lcUnsupportedGeneratedEntity(entry,canonicalName,lcEvidenceForName(canonicalName,cfg));if(unsupported)return{ok:false,error:"generated card introduced unsupported named entity: "+unsupported};var keys=lcSanitizeKeys(cdata.keys,canonicalName,c&&c.aliases);if(!keys)keys=canonicalName;
-  var card=lcCreateCard(canonicalName,keys,entry,LC_TYPE_NAMES[kind],LC_MARKER+"\nManaged factual Story Card. Character Current, when enabled, is stored in a separate marked Notes block without altering the factual Entry.");if(!card)return{ok:false,error:"could not create Story Card"};
-  var meta=lcMarkManaged(card,kind,false);if(meta){meta.createdTurn=lcCurrentActionCount();meta.lastRefreshTurn=lcCurrentActionCount();meta.refreshEvidence=[];meta.lastWrittenSig=lcCardContentSig(card);meta.lastManualSig=lcManualCardSig(card);}if(c)c.created=true;lc.lastCreateTurn=lcCurrentActionCount();lc.stats.cardsCreated++;return{ok:true,changed:true,name:canonicalName};
+  var canonicalName=(c&&c.name)||name,evidenceRows=lcEvidenceForName(canonicalName,cfg),entry=lcEnsureEntityNamedInEntry(canonicalName,cdata.entry,cfg.cardMax);if(entry.length<30)return{ok:false,error:"generated card entry was too small"};var unsupported=lcUnsupportedGeneratedEntity(entry,canonicalName,evidenceRows);if(unsupported)return{ok:false,error:"generated card introduced unsupported named entity: "+unsupported};var keys=lcSanitizeKeys(cdata.keys,canonicalName,c&&c.aliases);if(!keys)keys=canonicalName;
+  var visibleType=lcVisibleCardType(kind,canonicalName,evidenceRows.concat([entry]),cdata.type);
+  var card=lcCreateCard(canonicalName,keys,entry,visibleType,LC_MARKER+"\nManaged factual Story Card. Vehicle is a semantic subtype of Item when transport evidence supports it. Character Current, when enabled, is stored in a separate marked Notes block without altering the factual Entry.");if(!card)return{ok:false,error:"could not create Story Card"};
+  var meta=lcMarkManaged(card,kind,false);if(meta){meta.subtype=kind==="item"?lcInferItemSubtype(canonicalName,evidenceRows.concat([entry]),visibleType):kind;meta.createdTurn=lcCurrentActionCount();meta.lastRefreshTurn=lcCurrentActionCount();meta.refreshEvidence=[];meta.lastWrittenSig=lcCardContentSig(card);meta.lastManualSig=lcManualCardSig(card);}if(c)c.created=true;lc.lastCreateTurn=lcCurrentActionCount();lc.stats.cardsCreated++;return{ok:true,changed:true,name:canonicalName};
 }
 
 
@@ -6013,9 +6118,10 @@ function lcProcessRefresh(task,data,cfg) {
   var oldEntry=String(card.entry||""),entry=lcEnsureEntityNamedInEntry(card.title||name,data.card.entry,cfg.cardMax);if(entry.length<30)return{ok:false,error:"refresh entry was too small"};if(oldEntry.length>260&&entry.length<Math.max(90,Math.floor(oldEntry.length*0.30)))return{ok:false,error:"refresh replacement was implausibly destructive"};var refreshEvidence=(meta.refreshEvidence||[]).map(function(e){return e&&e.snippet||"";});var unsupported=lcUnsupportedGeneratedEntity(entry,card.title||name,refreshEvidence.concat([oldEntry]));if(unsupported)return{ok:false,error:"refresh introduced unsupported named entity: "+unsupported};
   var candidate=lc.candidates[lcResolveAliasKey(card.title||name)],safeAliases=(candidate&&candidate.aliases||[]).concat(lcCardKeys(card)),safeKeys=lcSanitizeKeys(card.keys,card.title||name,safeAliases);
   if(!safeKeys)safeKeys=String(card.keys||card.title||name);
-  if(lcHash(entry)===lcHash(oldEntry)&&String(safeKeys)===String(card.keys||"")){meta.refreshEvidence=[];meta.lastRefreshTurn=lcCurrentActionCount();meta.lastWrittenSig=lcCardContentSig(card);meta.lastManualSig=lcManualCardSig(card);lc.stats.skippedTasks++;return{ok:true,changed:false};}
+  var refreshedType=card.type;if(meta.kind==="item"){var subtypeEvidence=refreshEvidence.concat([oldEntry,entry]);refreshedType=lcVisibleCardType("item",card.title||name,subtypeEvidence,card.type);meta.subtype=lcInferItemSubtype(card.title||name,subtypeEvidence,refreshedType);}
+  if(lcHash(entry)===lcHash(oldEntry)&&String(safeKeys)===String(card.keys||"")&&String(refreshedType)===String(card.type||"")){meta.refreshEvidence=[];meta.lastRefreshTurn=lcCurrentActionCount();meta.lastWrittenSig=lcCardContentSig(card);meta.lastManualSig=lcManualCardSig(card);lc.stats.skippedTasks++;return{ok:true,changed:false};}
   var rollbackSnap={turn:lcCurrentActionCount(),prevLastRefreshTurn:meta.lastRefreshTurn,before:{title:String(card.title||""),keys:String(card.keys||""),entry:oldEntry,type:String(card.type||""),description:String(card.description||"")}};meta.writeHistory=Array.isArray(meta.writeHistory)?meta.writeHistory:[];meta.writeHistory.push(rollbackSnap);if(meta.writeHistory.length>5)meta.writeHistory=meta.writeHistory.slice(-5);
-  if(!lcPersistCard(card,safeKeys,entry,card.type)){if(meta.writeHistory[meta.writeHistory.length-1]===rollbackSnap)meta.writeHistory.pop();return{ok:false,error:"could not persist refreshed Story Card"};}
+  if(!lcPersistCard(card,safeKeys,entry,refreshedType)){if(meta.writeHistory[meta.writeHistory.length-1]===rollbackSnap)meta.writeHistory.pop();return{ok:false,error:"could not persist refreshed Story Card"};}
   card=card.id!=null?(lcFindCardById(card.id)||card):card;meta.lastRefreshTurn=lcCurrentActionCount();meta.refreshEvidence=[];meta.title=card.title;if(card.id!=null)meta.cardId=card.id;meta.lastWrittenSig=lcCardContentSig(card);meta.lastManualSig=lcManualCardSig(card);lcRekeyManagedMeta(meta,card);lc.lastRefreshTurn=lcCurrentActionCount();lc.stats.cardsRefreshed++;return{ok:true,changed:true,name:card.title};
 }
 
@@ -6164,7 +6270,7 @@ function lcStatusText(cfg) {
     lc.lastNotice ? "Last notice: " + lc.lastNotice : "",
     "Codex: " + cfg.codex + " | create " + cfg.codexCreate + " | refresh " + cfg.codexRefresh,
     "Ordinary-word shield: " + LC_ORDINARY_STOPWORDS.size + "+ terms + morphology + hard-name quarantine + contextual guards",
-    "Types: characters " + cfg.trackCharacters + " | locations " + cfg.trackLocations + " | items " + cfg.trackItems + " | factions " + cfg.trackFactions,
+    "Types: characters " + cfg.trackCharacters + " | locations " + cfg.trackLocations + " | items/vehicles " + cfg.trackItems + " | factions " + cfg.trackFactions,
     "Pending candidates: " + pending.length + " | managed cards: " + managed.length + " | protected " + protectedCount + " | missing " + missingCount,
     "Created: " + (lc.stats.cardsCreated||0) + " | refreshed: " + (lc.stats.cardsRefreshed||0) + " | manual protections: " + (lc.stats.manualProtections||0),
     "Timeline repairs: " + (lc.stats.timelineRepairs||0) + " | refresh rollbacks: " + (lc.stats.cardsRolledBack||0) + " | undone auto-cards removed: " + (lc.stats.cardsRemovedOnUndo||0), "",
@@ -6306,7 +6412,7 @@ function lcContextPass(text) {
   var task=lcScheduleForcedTask(cfg);if(!task)task=lcScheduleAutomaticTask(cfg);if(task){if((task.kind==="create"||task.kind==="refresh")&&!cfg.codex)task=null;else if(task.kind==="create"&&!cfg.codexCreate)task=null;else if(task.kind==="refresh"&&!cfg.codexRefresh)task=null;else if(task.kind==="compass"&&!cfg.narrativeCompass)task=null;else if(task.kind==="current"&&!cfg.characterCurrent)task=null;else if(task.kind==="memory"&&!cfg.plotEssentials&&!cfg.authorsNote)task=null;}
   var additions=[];
   if(!(task&&task.forced)){var pulse=task&&task.kind==="compass"?lcBuildContinuityPulse(cfg,false,true):task&&task.kind==="current"?lcBuildContinuityPulse(cfg,true,false):lcFluidNarrativeGuidance(cfg);if(pulse)additions.push(pulse);}
-  if(task){lc.pendingTask=task;lc.lastTaskAttempt[task.kind]=lcCurrentActionCount();additions.push(lcBuildTaskInstruction(task,cfg));}
+  if(task){lc.pendingTask=task;lc.lastTaskAttempt[task.kind]=lcCurrentActionCount();if(!task.forced)lc.lastAutoTaskTurn=lcCurrentActionCount();additions.push(lcBuildTaskInstruction(task,cfg));}
   return additions.length?lcFitContextInstruction(base,additions.join("\n")):base;
 }
 
