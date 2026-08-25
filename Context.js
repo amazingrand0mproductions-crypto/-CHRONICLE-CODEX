@@ -2,17 +2,21 @@ var modifier = (text) => {
   var original = String(text == null ? "" : text);
   try {
     var nextText = lcContextPass(original);
-    if (typeof nextText !== "string" || !nextText.length) return { text: original };
-    return { text: nextText };
+    return { text: typeof nextText === "string" && nextText.length ? nextText : original };
   } catch (e) {
-    lcLog("Context error: " + (e && e.message ? e.message : e));
+    try { lcLog("Context error: " + (e && e.message ? e.message : e)); } catch (_) {}
     try {
-      var cfg = lcParseConfig();
       var lcState = state && (state.chronicleCodex || state.livingCodex);
-      if (lcState) lcState.pendingTask = null;
+      if (lcState) {
+        lcState.pendingTask = null;
+        lcState.forcedTask = null;
+        lcState.commandConsume = null;
+      }
+      var cfg = lcParseConfig();
       lcApplyMemoryOverrides(cfg);
       lcEnsureMemoryMirror(cfg);
     } catch (_) {}
+    // Never sacrifice the normal model context because maintenance failed.
     return { text: original };
   }
 };
