@@ -34,7 +34,7 @@ var LC_LEGACY_DATA_OPEN = "<LIVING_CODEX_DATA>";
 var LC_LEGACY_DATA_CLOSE = "</LIVING_CODEX_DATA>";
 var LC_LEGACY_INTERNAL_PREFIX = "__living_codex_";
 var LC_LEGACY_STATE_KEY = "livingCodex";
-var LC_STATE_REVISION = 11;
+var LC_STATE_REVISION = 12;
 var LC_NEW_CARD_PREFIX = "__chronicle_codex_new_";
 var LC_RUNTIME = {
   pass: 0,
@@ -87,6 +87,9 @@ var LC_DEFAULTS = {
   continuityAnchors: true,
   npcIntentGuidance: true,
   allowOrganicDetours: true,
+  adaptiveGuidance: true,
+  sceneBreathing: true,
+  guidanceBudget: 950,
   compassEvery: 3,
   compassSensitivity: 1,
   compassMax: 900,
@@ -3934,7 +3937,7 @@ function lcConfigEntry(cfg) {
     group(["master"]), [""],
     group(["codex","codexCreate","codexRefresh","trackCharacters","trackLocations","trackItems","trackFactions","adoptLegacy","adoptManaged","mentions","distinctTurns","detectionStrictness","codexCooldown","refreshEvidence","refreshCooldown","protectManual","cardMax"]), [""],
     group(["plotEssentials","authorsNote","plotEvery","authorEvery","memorySensitivity","plotMax","authorMax","preserveManualMemory","memoryMirror"]), [""],
-    group(["narrativeCompass","compassStrength","driftGuard","sceneObjectives","continuityAnchors","npcIntentGuidance","allowOrganicDetours","compassEvery","compassSensitivity","compassMax","compassExpiry"]), [""],
+    group(["narrativeCompass","compassStrength","driftGuard","sceneObjectives","continuityAnchors","npcIntentGuidance","allowOrganicDetours","adaptiveGuidance","sceneBreathing","guidanceBudget","compassEvery","compassSensitivity","compassMax","compassExpiry"]), [""],
     group(["characterCurrent","currentInfluence","currentEvery","currentSensitivity","currentInfluenceCharacters","currentMax","currentExpiry"]), [""],
     group(["storyWindow","evidencePerEntity","messages"])
   ).join("\n");
@@ -3989,12 +3992,15 @@ function lcConfigNotes() {
     "continuityAnchors [true/false] — Feed 1–4 must-respect scene/arc facts that are especially easy for the model to forget right now.",
     "npcIntentGuidance [true/false] — Let established active NPC intentions contribute to direction without exposing private thoughts to other characters.",
     "allowOrganicDetours [true/false] — true lets the story follow player-led or naturally emerging detours while preserving unresolved threads. false prefers the current direction until the player clearly changes course.",
-    "compassEvery [2–30] — Earliest interval between automatic compass assessments.",
+    "adaptiveGuidance [true/false] — Dynamically soften or strengthen narrator guidance from drift, freshness and recent scene pivots instead of injecting the same pressure every turn.",
+    "sceneBreathing [true/false] — In stable low-drift scenes, trim low-priority guidance so dialogue, quiet beats and natural pacing are not over-directed.",
+    "guidanceBudget [500–1600] — Hard character budget for the combined Narrative Compass + Character Current continuity pulse injected into one generation.",
+    "compassEvery [2–30] — Baseline interval between automatic compass assessments. With adaptiveGuidance, low-drift scenes can wait a little longer while high drift or a clear scene pivot can trigger a faster reassessment.",
     "compassSensitivity [0–6] — Minimum recent-story change score before a routine compass check. Lower values react faster.",
     "compassMax [350–1400] — Maximum stored compass guidance characters.",
     "compassExpiry [4–60] — Stop injecting a compass that has not been re-verified within this many actions.",
     "",
-    "Narrative Compass is intentionally temporary. It tracks current objective, unresolved pressure, continuity anchors, active NPC intent, momentum and a drift guard. It is not Plot Essentials, does not decide player actions, does not force reveals, and should relax or change direction when the player genuinely changes course.",
+    "Narrative Compass is intentionally temporary. It tracks current objective, unresolved pressure, continuity anchors, active NPC intent, momentum and a drift guard. Guidance is merged with Character Current into one compact Continuity Pulse, prioritises the latest player action and immediate causality, fades as it ages, and should relax or change direction when the story genuinely changes course.",
     "",
     "━━━━━━━━━━ CHARACTER CURRENT ━━━━━━━━━━",
     "characterCurrent [true/false] — Track a compact below-the-surface continuity state for active NPC Character cards.",
@@ -4225,7 +4231,7 @@ function lcNormalizeConfig(values) {
   Object.keys(LC_DEFAULTS).forEach(function(k){ cfg[k] = LC_DEFAULTS[k]; });
   ["master","codex","codexCreate","codexRefresh","trackCharacters","trackLocations","trackItems","trackFactions",
    "adoptLegacy","adoptManaged","protectManual","plotEssentials","authorsNote","preserveManualMemory","memoryMirror",
-   "narrativeCompass","driftGuard","sceneObjectives","continuityAnchors","npcIntentGuidance","allowOrganicDetours",
+   "narrativeCompass","driftGuard","sceneObjectives","continuityAnchors","npcIntentGuidance","allowOrganicDetours","adaptiveGuidance","sceneBreathing",
    "characterCurrent","currentInfluence","messages"].forEach(function(k){ if (get(k) != null) cfg[k] = lcBool(get(k), cfg[k]); });
   var compassStrength = lcNorm(get("compassStrength") || cfg.compassStrength);
   cfg.compassStrength = /^(?:low|medium|high)$/.test(compassStrength) ? compassStrength : LC_DEFAULTS.compassStrength;
@@ -4245,6 +4251,7 @@ function lcNormalizeConfig(values) {
   cfg.compassSensitivity = lcBoundInt(get("compassSensitivity"), cfg.compassSensitivity, 0, 6);
   cfg.compassMax = lcBoundInt(get("compassMax"), cfg.compassMax, 350, 1400);
   cfg.compassExpiry = lcBoundInt(get("compassExpiry"), cfg.compassExpiry, 4, 60);
+  cfg.guidanceBudget = lcBoundInt(get("guidanceBudget"), cfg.guidanceBudget, 500, 1600);
   cfg.currentEvery = lcBoundInt(get("currentEvery"), cfg.currentEvery, 2, 100);
   cfg.currentSensitivity = lcBoundInt(get("currentSensitivity"), cfg.currentSensitivity, 0, 4);
   cfg.currentInfluenceCharacters = lcBoundInt(get("currentInfluenceCharacters"), cfg.currentInfluenceCharacters, 1, 3);
@@ -5524,6 +5531,65 @@ function lcCompassVerifiedTurn(compass) {
   return isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
+function lcRecentScenePivotScore(cfg) {
+  var actions = lcExtractHistoryWindow(cfg).slice(-3), score = 0;
+  actions.forEach(function(a, idx) {
+    var t = String(a && a.text || "");
+    if (!t) return;
+    if (/\b(?:instead|change(?:s|d)? (?:course|direction|subject)|move(?:s|d)? on|walk(?:s|ed)? away|leave(?:s|d)?|head(?:s|ed)? (?:to|toward|towards)|go(?:es|ne|ing)? (?:to|back|elsewhere)|return(?:s|ed)? to|later that|hours later|the next (?:day|morning|night)|elsewhere|meanwhile)\b/i.test(t)) score += idx === actions.length - 1 ? 2 : 1;
+    if (/\b(?:new plan|different plan|forget that|ignore that|drop it|not now|another matter|something else)\b/i.test(t)) score += 2;
+  });
+  return Math.min(4, score);
+}
+
+function lcCompassRuntimeRank(cfg, compass) {
+  var c = compass && typeof compass === "object" ? compass : {}, rank = lcCompassStrengthRank(cfg && cfg.compassStrength), now = lcCurrentActionCount();
+  if (!cfg || !cfg.adaptiveGuidance) return rank;
+  var drift = lcNorm(c.drift || "low"), verified = lcCompassVerifiedTurn(c), age = verified ? Math.max(0, now - verified) : cfg.compassExpiry;
+  if (drift === "high") rank++;
+  if (cfg.sceneBreathing && drift === "low" && !lcClean(c.pressure, 20)) rank--;
+  if (age > Math.max(2, Math.floor(cfg.compassExpiry * 0.60))) rank--;
+  if (lcRecentScenePivotScore(cfg) >= 2) rank--;
+  return Math.max(1, Math.min(3, rank));
+}
+
+function lcEffectiveCompassInterval(cfg) {
+  var base = Math.max(2, Number(cfg && cfg.compassEvery || 3));
+  if (!cfg || !cfg.adaptiveGuidance) return base;
+  var lc = lcEnsureState(), c = lc.compass || {}, drift = lcNorm(c.drift || ""), verified = lcCompassVerifiedTurn(c), now = lcCurrentActionCount(), interval = base;
+  if (drift === "high") interval = Math.max(2, base - 1);
+  else if (drift === "low" && verified && now - verified < Math.max(2, Math.floor(cfg.compassExpiry * 0.45))) interval = Math.min(30, base + (cfg.sceneBreathing ? 2 : 1));
+  if (lcRecentScenePivotScore(cfg) > 0) interval = Math.max(2, Math.min(interval, base - 1));
+  if (verified && now - verified >= Math.max(2, cfg.compassExpiry - 2)) interval = 2;
+  return interval;
+}
+
+function lcNegationShape(text) {
+  var s = lcFold(text || "");
+  return /\b(?:not|no|never|neither|nor|without|cannot|can't|won't|isn't|wasn't|doesn't|didn't|shouldn't|wouldn't|couldn't)\b/.test(s) ? 1 : 0;
+}
+
+function lcMaterialTextDifferent(a, b, threshold) {
+  a = lcClean(a || "", 4000); b = lcClean(b || "", 4000);
+  if (lcNorm(a) === lcNorm(b)) return false;
+  if (!a || !b) return true;
+  if (lcNegationShape(a) !== lcNegationShape(b)) return true;
+  return lcSimilarity(a, b) < Math.max(0.60, Math.min(0.995, Number(threshold || 0.90)));
+}
+
+function lcCompassMeaningfullyChanged(oldC, newC) {
+  oldC = oldC && typeof oldC === "object" ? oldC : {}; newC = newC && typeof newC === "object" ? newC : {};
+  if (lcNorm(oldC.drift || "low") !== lcNorm(newC.drift || "low")) return true;
+  if (lcMaterialTextDifferent(oldC.objective, newC.objective, 0.74)) return true;
+  if (lcMaterialTextDifferent(oldC.pressure, newC.pressure, 0.74)) return true;
+  if (lcMaterialTextDifferent(oldC.momentum, newC.momentum, 0.82)) return true;
+  if (lcMaterialTextDifferent(oldC.guard, newC.guard, 0.66)) return true;
+  if (lcMaterialTextDifferent((oldC.anchors || []).join(" | "), (newC.anchors || []).join(" | "), 0.76)) return true;
+  if (lcMaterialTextDifferent((oldC.intents || []).join(" | "), (newC.intents || []).join(" | "), 0.66)) return true;
+  return false;
+}
+
+
 function lcCompassSnapshotText(compass, maxLen) {
   compass = compass && typeof compass === "object" ? compass : {};
   var rows = [];
@@ -5538,23 +5604,7 @@ function lcCompassSnapshotText(compass, maxLen) {
 }
 
 function lcCompassInfluenceInstruction(cfg) {
-  if (!cfg || !cfg.master || !cfg.narrativeCompass) return "";
-  var lc = lcEnsureState(), c = lc.compass || {}, now = lcCurrentActionCount(), verified = lcCompassVerifiedTurn(c);
-  if (!verified || now - verified > cfg.compassExpiry) return "";
-  var rank = lcCompassStrengthRank(cfg.compassStrength), rows = [];
-  if (cfg.sceneObjectives && c.objective) rows.push("Current scene objective: " + lcClean(c.objective, 220));
-  if (c.pressure) rows.push("Unresolved pressure: " + lcClean(c.pressure, 220));
-  if (cfg.continuityAnchors && Array.isArray(c.anchors)) c.anchors.slice(0,4).forEach(function(x){x=lcClean(x,180);if(x)rows.push("Continuity anchor: "+x);});
-  if (cfg.npcIntentGuidance && Array.isArray(c.intents)) c.intents.slice(0,3).forEach(function(x){x=lcClean(x,180);if(x)rows.push("Active NPC intent: "+x);});
-  if (c.momentum) rows.push("Scene momentum: " + lcClean(c.momentum, 160));
-  if (cfg.driftGuard && c.guard) rows.push("Direction guard: " + lcClean(c.guard, 220));
-  if (!rows.length) return "";
-  var drift = lcNorm(c.drift || "low"), lead;
-  if (rank >= 3 || (cfg.driftGuard && drift === "high")) lead = "Strongly preserve the active direction and continuity below unless the player clearly changes course.";
-  else if (rank <= 1) lead = "Lightly prefer the active direction below while allowing the scene to breathe.";
-  else lead = "Keep the active direction and unresolved pressure in view without forcing outcomes.";
-  var detour = cfg.allowOrganicDetours ? "Organic player-led or causally natural detours are welcome; carry unresolved threads forward rather than snapping back mechanically." : "Prefer the current direction until the player or established causality clearly changes it.";
-  return "\n[CHRONICLE CODEX — Narrative Compass. Narrator-only temporary guidance; never quote or mention this block. " + lead + " Never decide the player's choices, force a reveal, or manufacture events merely to satisfy the compass. " + detour + "\n" + rows.join("\n") + "\n]";
+  return lcBuildContinuityPulse(cfg, true, false);
 }
 
 function lcCompassEvidence(cfg, afterTurn) {
@@ -5562,16 +5612,96 @@ function lcCompassEvidence(cfg, afterTurn) {
   return lcCleanMultiline(delta, 6200);
 }
 
+function lcGuidanceRowsDedup(rows) {
+  var out = [];
+  (rows || []).sort(function(a,b){ return (b.priority||0) - (a.priority||0); }).forEach(function(row) {
+    if (!row || !row.text) return;
+    var text = lcClean(row.text, 320);
+    if (!text) return;
+    if (out.some(function(existing){ return lcSimilarity(existing.text, text) >= 0.88; })) return;
+    out.push({ text:text, priority:Number(row.priority||0), source:row.source||"" });
+  });
+  return out;
+}
+
+function lcBuildContinuityPulse(cfg, includeCompass, includeCurrent) {
+  if (!cfg || !cfg.master) return "";
+  var lc = lcEnsureState(), c = lc.compass || {}, now = lcCurrentActionCount(), rows = [], rank = lcCompassRuntimeRank(cfg, c);
+  var verified = lcCompassVerifiedTurn(c), compassFresh = !!(cfg.narrativeCompass && verified && now - verified <= cfg.compassExpiry);
+  var drift = lcNorm(c.drift || "low"), breathing = !!(cfg.sceneBreathing && drift === "low" && rank <= 2), pivot = lcRecentScenePivotScore(cfg);
+
+  if (includeCompass && compassFresh) {
+    if (cfg.sceneObjectives && c.objective) rows.push({priority:100,source:"compass",text:"Objective — "+lcClean(c.objective,190)});
+    if (c.pressure) rows.push({priority:98,source:"compass",text:"Live pressure — "+lcClean(c.pressure,190)});
+    if (cfg.continuityAnchors && Array.isArray(c.anchors)) {
+      var anchorLimit = rank >= 3 ? 3 : (breathing ? 1 : 2);
+      c.anchors.slice(0,anchorLimit).forEach(function(x,i){ x=lcClean(x,165); if(x)rows.push({priority:92-i,source:"compass",text:"Continuity — "+x}); });
+    }
+    if (cfg.npcIntentGuidance && Array.isArray(c.intents) && !breathing) {
+      c.intents.slice(0,rank>=3?2:1).forEach(function(x,i){ x=lcClean(x,165); if(x)rows.push({priority:82-i,source:"compass",text:"NPC direction — "+x}); });
+    }
+    if (c.momentum) rows.push({priority:78,source:"compass",text:"Momentum — "+lcClean(c.momentum,130)});
+    if (cfg.driftGuard && c.guard && (drift !== "low" || rank >= 3)) rows.push({priority:96,source:"compass",text:"Drift guard — "+lcClean(c.guard,185)});
+  }
+
+  if (includeCurrent && cfg.characterCurrent && cfg.currentInfluence) {
+    var currentLimit = Math.min(cfg.currentInfluenceCharacters, rank >= 3 ? 2 : 1), used = 0;
+    lcActiveCharacterCards(cfg).forEach(function(a) {
+      if (used >= currentLimit) return;
+      var m = lcCurrentForCard(a.card);
+      if (!m || now - lcCurrentVerifiedTurn(m) > cfg.currentExpiry) return;
+      var compassAlreadyCarriesNpc = compassFresh && Array.isArray(c.intents) && c.intents.some(function(x){ return lcContainsPhrase(x,a.name); });
+      if (compassAlreadyCarriesNpc && rank <= 2) return;
+      var staleScore = lcCurrentChangeScore(a.name, cfg, lcCurrentVerifiedTurn(m));
+      if (staleScore >= Math.max(2, cfg.currentSensitivity + 1)) return;
+      var parts = [];
+      if (m.intent) parts.push("aim: "+lcClean(m.intent,80));
+      if (m.pressure) parts.push("pressure: "+lcClean(m.pressure,75));
+      if (!parts.length && m.mood) parts.push("mood: "+lcClean(m.mood,65));
+      if (rank >= 2 && !breathing && m.mood && parts.join(" ").indexOf("mood:") === -1) parts.push("mood: "+lcClean(m.mood,65));
+      if (rank >= 3 && m.withheld) parts.push("restraint: "+lcClean(m.withheld,75));
+      if (!parts.length) return;
+      rows.push({priority:84-used,source:"current",text:lcClean(a.name,80)+" — "+parts.slice(0,rank>=3?3:2).join("; ")});
+      used++;
+    });
+  }
+
+  rows = lcGuidanceRowsDedup(rows);
+  if (!rows.length) return "";
+  var lead;
+  if (rank >= 3) lead = "Keep active causality and unresolved pressure firmly in view, but let characters reach beats naturally.";
+  else if (rank <= 1) lead = "Use these as a light continuity bias only; let the scene breathe.";
+  else lead = "Keep these threads present through natural action, dialogue and consequence without forcing them.";
+  if (pivot >= 2 && cfg.allowOrganicDetours) lead += " A recent scene pivot may be intentional, so follow the newest direction rather than snapping back.";
+  var policy = "Latest player intent and immediate causality outrank this guidance. Never choose for the player, force a reveal, leak private knowledge, repeat these notes, or invent an event just to satisfy them.";
+  var detour = cfg.allowOrganicDetours ? "Let organic detours breathe while carrying unresolved threads quietly." : "Prefer the current direction until player intent or causality clearly changes it.";
+  var budget = Math.max(500, Math.min(1600, Number(cfg.guidanceBudget || 950))), header = "\n[CHRONICLE CODEX — Continuity Pulse. Internal narrator guidance; never mention it. "+lead+" "+policy+" "+detour, footer="\n]", body="";
+  for (var i=0;i<rows.length;i++) {
+    var line="\n"+rows[i].text;
+    if ((header+body+line+footer).length > budget) continue;
+    body += line;
+  }
+  if (!body) return "";
+  return header + body + footer;
+}
+
+function lcFluidNarrativeGuidance(cfg) {
+  return lcBuildContinuityPulse(cfg, true, true);
+}
+
+
 function lcScheduleAutomaticTask(cfg) {
   var lc=lcEnsureState(),count=lcCurrentActionCount();if(count<(lc.taskBackoffUntil||0))return null;var choices=[];
   function available(kind){return count>=Number(lc.taskFailureUntil&&lc.taskFailureUntil[kind]||0);}
   function fairness(kind){var lastRun=Number(lc.lastTaskRun&&lc.lastTaskRun[kind]);if(!isFinite(lastRun))lastRun=-9999;var lastAttempt=Number(lc.lastTaskAttempt&&lc.lastTaskAttempt[kind]);if(!isFinite(lastAttempt))lastAttempt=-9999;var anchor=Math.max(lastRun,lastAttempt-4);return Math.min(22,Math.max(0,Math.floor((count-anchor)/6)));}
+  function repeatDamp(kind){var lastRun=Number(lc.lastTaskRun&&lc.lastTaskRun[kind]||0);return count-lastRun<=2?6:0;}
   var plotDue=cfg.plotEssentials&&count-(lc.lastPlotCheck||0)>=cfg.plotEvery,authorDue=cfg.authorsNote&&count-(lc.lastAuthorCheck||0)>=cfg.authorEvery;
-  if((plotDue||authorDue)&&available("memory")){var since=Math.min(plotDue?(lc.lastPlotCheck||0):count,authorDue?(lc.lastAuthorCheck||0):count),delta=lcHistoryDelta(since,cfg,7200),sig=lcSignificanceScore(delta);if(sig>=cfg.memorySensitivity){var overdue=Math.max(plotDue?count-(lc.lastPlotCheck||0)-cfg.plotEvery:0,authorDue?count-(lc.lastAuthorCheck||0)-cfg.authorEvery:0);choices.push({score:92+sig+Math.min(24,overdue*2)+fairness("memory"),kind:"memory",payload:{plot:plotDue,author:authorDue,significance:sig}});}else{if(plotDue)lc.lastPlotCheck=count;if(authorDue)lc.lastAuthorCheck=count;}}
-  if(cfg.narrativeCompass&&count-(lc.lastCompassCheck||0)>=cfg.compassEvery&&available("compass")){var cSince=lc.lastCompassCheck||0,cDelta=lcCompassEvidence(cfg,cSince),cSig=lcSignificanceScore(cDelta),cVerified=lcCompassVerifiedTurn(lc.compass),cStale=!cVerified||count-cVerified>=cfg.compassExpiry;if(cSig>=cfg.compassSensitivity||cStale){var cOver=Math.max(0,count-cSince-cfg.compassEvery),driftBoost=lcNorm(lc.compass&&lc.compass.drift||"")==="high"?7:0;choices.push({score:86+cSig+Math.min(20,cOver*2)+driftBoost+fairness("compass"),kind:"compass",payload:{significance:cSig}});}else lc.lastCompassCheck=count;}
-  if(cfg.codex&&cfg.codexCreate&&available("create")){var c=lcPickCreateCandidate(cfg);if(c){var ti=lcPickTypeInfo(c.typeVotes||{}),age=Math.max(0,count-(c.lastSeen||count));choices.push({score:80+(c.explicit||0)*3+Math.min(12,c.mentions||0)+ti.score+ti.margin+Math.min(8,age)+fairness("create"),kind:"create",payload:{name:c.name}});}}
-  if(cfg.codex&&cfg.codexRefresh&&available("refresh")){var r=lcPickRefreshCandidate(cfg);if(r){var overdueR=Math.max(0,count-(r.meta.lastRefreshTurn||0)-cfg.refreshCooldown);choices.push({score:77+Math.min(14,r.meta.refreshEvidence.length*2)+Math.min(18,Math.floor(overdueR/3))+fairness("refresh"),kind:"refresh",payload:{name:r.card.title||r.meta.title}});}}
-  if(cfg.characterCurrent&&count-(lc.lastCurrentCheck||0)>=cfg.currentEvery&&available("current")){var target=lcPickCurrentTarget(cfg,null);if(!target)lc.lastCurrentCheck=count;else{var cs=typeof target.changeScore==="number"?target.changeScore:0;if(cs>=cfg.currentSensitivity)choices.push({score:70+cs+Math.min(30,(target.overdue||0)*2)+fairness("current"),kind:"current",payload:{name:target.name}});else lc.lastCurrentCheck=count;}}
+  if((plotDue||authorDue)&&available("memory")){var since=Math.min(plotDue?(lc.lastPlotCheck||0):count,authorDue?(lc.lastAuthorCheck||0):count),delta=lcHistoryDelta(since,cfg,7200),sig=lcSignificanceScore(delta);if(sig>=cfg.memorySensitivity){var overdue=Math.max(plotDue?count-(lc.lastPlotCheck||0)-cfg.plotEvery:0,authorDue?count-(lc.lastAuthorCheck||0)-cfg.authorEvery:0);choices.push({score:92+sig+Math.min(24,overdue*2)+fairness("memory")-repeatDamp("memory"),kind:"memory",payload:{plot:plotDue,author:authorDue,significance:sig}});}else{if(plotDue)lc.lastPlotCheck=count;if(authorDue)lc.lastAuthorCheck=count;}}
+  var compassEvery=lcEffectiveCompassInterval(cfg);
+  if(cfg.narrativeCompass&&count-(lc.lastCompassCheck||0)>=compassEvery&&available("compass")){var cSince=lc.lastCompassCheck||0,cDelta=lcCompassEvidence(cfg,cSince),cSig=lcSignificanceScore(cDelta),pivot=lcRecentScenePivotScore(cfg);cSig=Math.min(12,cSig+Math.min(3,pivot));var cVerified=lcCompassVerifiedTurn(lc.compass),cStale=!cVerified||count-cVerified>=cfg.compassExpiry;if(cSig>=cfg.compassSensitivity||cStale||pivot>=2){var cOver=Math.max(0,count-cSince-compassEvery),driftBoost=lcNorm(lc.compass&&lc.compass.drift||"")==="high"?8:0;choices.push({score:86+cSig+Math.min(20,cOver*2)+driftBoost+Math.min(5,pivot*2)+fairness("compass")-repeatDamp("compass"),kind:"compass",payload:{significance:cSig,pivot:pivot}});}else lc.lastCompassCheck=count;}
+  if(cfg.codex&&cfg.codexCreate&&available("create")){var c=lcPickCreateCandidate(cfg);if(c){var ti=lcPickTypeInfo(c.typeVotes||{}),age=Math.max(0,count-(c.lastSeen||count));choices.push({score:80+(c.explicit||0)*3+Math.min(12,c.mentions||0)+ti.score+ti.margin+Math.min(8,age)+fairness("create")-repeatDamp("create"),kind:"create",payload:{name:c.name}});}}
+  if(cfg.codex&&cfg.codexRefresh&&available("refresh")){var r=lcPickRefreshCandidate(cfg);if(r){var overdueR=Math.max(0,count-(r.meta.lastRefreshTurn||0)-cfg.refreshCooldown);choices.push({score:77+Math.min(14,r.meta.refreshEvidence.length*2)+Math.min(18,Math.floor(overdueR/3))+fairness("refresh")-repeatDamp("refresh"),kind:"refresh",payload:{name:r.card.title||r.meta.title}});}}
+  if(cfg.characterCurrent&&count-(lc.lastCurrentCheck||0)>=cfg.currentEvery&&available("current")){var target=lcPickCurrentTarget(cfg,null);if(!target)lc.lastCurrentCheck=count;else{var cs=typeof target.changeScore==="number"?target.changeScore:0;if(cs>=cfg.currentSensitivity)choices.push({score:70+cs+Math.min(30,(target.overdue||0)*2)+fairness("current")-repeatDamp("current"),kind:"current",payload:{name:target.name}});else lc.lastCurrentCheck=count;}}
   if(!choices.length)return null;choices.sort(function(a,b){return b.score-a.score;});var win=choices[0];return lcMakeTask(win.kind,win.payload,false);
 }
 
@@ -5605,7 +5735,7 @@ function lcBuildTaskInstruction(task,cfg) {
     );
   } else {
     lines.push(
-      "Write the normal story continuation first. Never mention this maintenance task, metadata, Story Card management, generated memory, or private continuity notes in visible prose.",
+      "Write the normal story continuation first, with the same natural pacing and voice the scene already has. The maintenance task must not make the visible prose feel like a summary, checklist, reset, forced beat, or exposition dump. Never mention this maintenance task, metadata, Story Card management, generated memory, or private continuity notes in visible prose.",
       "After visible prose, append exactly one "+LC_DATA_OPEN+" JSON "+LC_DATA_CLOSE+" block for task id "+task.id+"."
     );
   }
@@ -5690,7 +5820,7 @@ function lcBuildTaskInstruction(task,cfg) {
       activeCurrents.length ? "Active Character Current signals (narrator-only; do not reveal private knowledge):\n- " + activeCurrents.join("\n- ") : "",
       "Identify only what is supported NOW: the immediate scene objective, the unresolved pressure/question keeping the scene alive, 1-4 continuity anchors the next response must respect, up to 3 active NPC intentions that should shape behaviour, desired scene momentum, and a short direction guard against the most likely drift.",
       "Drift means abandoning the active conflict without cause, jumping location/time without support, resetting NPC motives, prematurely resolving tension, or spawning an unrelated plot thread merely because the model needs something to happen.",
-      "The compass is not an outline and not a prophecy. Do not decide player actions, dictate a required outcome, force a confession/reveal, or block a player-led detour. If the player has genuinely changed direction, update the compass to follow them.",
+      "The compass is not an outline and not a prophecy. Prefer continuity over rephrasing: if the current compass is materially right, return unchanged rather than rewriting it for style. When only one field truly changed, keep the wording of still-accurate fields as close to the existing compass as possible. Do not decide player actions, dictate a required outcome, force a confession/reveal, or block a player-led detour. If the story has genuinely changed direction, update the compass to follow the newest causally supported direction.",
       "Use drift as one of: low, medium, high. 'guard' should be a concise narrator-facing caution, not a command to the player.",
       "Return update schema:",
       LC_DATA_OPEN+"{\"task\":\""+task.id+"\",\"nonce\":\""+task.nonce+"\",\"status\":\"update\",\"compass\":{\"objective\":\"immediate scene objective or empty\",\"pressure\":\"active unresolved pressure or empty\",\"anchors\":[\"1-4 must-respect facts\"],\"intents\":[\"up to 3 active NPC intentions\"],\"momentum\":\"escalate|investigate|negotiate|decompress|transition|pursue|survive|other concise mode\",\"guard\":\"short anti-drift caution or empty\",\"drift\":\"low|medium|high\"}}"+LC_DATA_CLOSE,
@@ -5705,7 +5835,7 @@ function lcBuildTaskInstruction(task,cfg) {
       "Current snapshot: "+JSON.stringify({mood:cur.mood||"",intent:cur.intent||"",pressure:cur.pressure||"",assumption:cur.assumption||"",withheld:cur.withheld||""}),
       "Recent evidence involving this NPC:",
       ev.map(function(e){return "- "+e;}).join("\n") || "- Use only evidence genuinely present in current story context.",
-      "Infer conservatively. Track mood, immediate intent, pressure, working assumption and what they are choosing not to say. Unknown fields may be empty. If an old field is no longer current or supported, clear it rather than preserving it by inertia.",
+      "Infer conservatively. Track mood, immediate intent, pressure, working assumption and what they are choosing not to say. Prefer continuity over cosmetic rewording: return unchanged when the existing snapshot remains materially accurate. Unknown fields may be empty. If an old field is no longer current or supported, clear it rather than preserving it by inertia.",
       "Do not create an affair, betrayal, secret identity, crime, prophecy, hidden power, master plan or other dramatic secret merely to populate the snapshot. 'Withheld' should usually be a present conversational restraint, not invented backstory.",
       "Return update schema:",
       LC_DATA_OPEN+"{\"task\":\""+task.id+"\",\"nonce\":\""+task.nonce+"\",\"status\":\"update\",\"current\":{\"name\":\""+p.name.replace(/"/g,"")+"\",\"mood\":\"current emotional posture or empty\",\"intent\":\"immediate wanted outcome or empty\",\"pressure\":\"current fear, tension or constraint or empty\",\"assumption\":\"private working interpretation or empty\",\"withheld\":\"presently unspoken thought/concern or empty\"}}"+LC_DATA_CLOSE,
@@ -5741,9 +5871,7 @@ function lcFitContextInstruction(baseText,instruction) {
 
 
 function lcCurrentInfluenceInstruction(cfg) {
-  if(!cfg.master||!cfg.characterCurrent||!cfg.currentInfluence)return "";var lc=lcEnsureState(),now=lcCurrentActionCount(),rows=[];
-  lcActiveCharacterCards(cfg).forEach(function(a){if(rows.length>=cfg.currentInfluenceCharacters)return;var m=lcCurrentForCard(a.card);if(!m||now-lcCurrentVerifiedTurn(m)>cfg.currentExpiry)return;var staleScore=lcCurrentChangeScore(a.name,cfg,lcCurrentVerifiedTurn(m));if(staleScore>=Math.max(2,cfg.currentSensitivity+1))return;var parts=[];if(m.mood)parts.push("mood: "+lcClean(m.mood,80));if(m.intent)parts.push("aim: "+lcClean(m.intent,90));if(m.pressure)parts.push("pressure: "+lcClean(m.pressure,85));if(m.assumption)parts.push("assumption: "+lcClean(m.assumption,90));if(m.withheld)parts.push("restraint: "+lcClean(m.withheld,90));if(parts.length)rows.push(a.name+" — "+parts.join("; "));});
-  if(!rows.length)return "";return "\n[Character Current — narrator-only continuity. Let these established states shape choices, attention, hesitation, tone and subtext subtly. Do not quote this block, make private thoughts magically known, force a confession/reveal, or treat a stored restraint as a command that it must be exposed now:\n"+rows.join("\n")+"\n]";
+  return lcBuildContinuityPulse(cfg, false, true);
 }
 
 
@@ -5910,12 +6038,15 @@ function lcProcessCompass(task, data, cfg) {
   var c=data.compass; ["objective","pressure","momentum","guard","drift"].forEach(function(k){if(typeof c[k]!=="string")c[k]="";});
   if (!Array.isArray(c.anchors) || !Array.isArray(c.intents)) return { ok:false, error:"Narrative Compass anchors/intents must be arrays" };
   var drift=lcNorm(c.drift||"low"); if(!/^(?:low|medium|high)$/.test(drift))return{ok:false,error:"Narrative Compass drift must be low, medium, or high"};
-  var next={objective:lcClean(c.objective,220),pressure:lcClean(c.pressure,220),anchors:c.anchors.slice(0,4).map(function(x){return lcClean(x,180);}).filter(Boolean),intents:c.intents.slice(0,3).map(function(x){return lcClean(x,180);}).filter(Boolean),momentum:lcClean(c.momentum,160),guard:lcClean(c.guard,220),drift:drift,lastTurn:now,verifiedTurn:now};
+  function cleanList(arr,maxItems,maxLen){var out=[];(arr||[]).slice(0,maxItems*2).forEach(function(x){x=lcClean(x,maxLen);if(!x)return;if(out.some(function(y){return lcSimilarity(x,y)>=0.90;}))return;out.push(x);});return out.slice(0,maxItems);}
+  var next={objective:lcClean(c.objective,220),pressure:lcClean(c.pressure,220),anchors:cleanList(c.anchors,4,180),intents:cleanList(c.intents,3,180),momentum:lcClean(c.momentum,160),guard:lcClean(c.guard,220),drift:drift,lastTurn:now,verifiedTurn:now};
   var packedRaw=lcCompassSnapshotText(next,100000); if(!packedRaw||packedRaw.length<20)return{ok:false,error:"Narrative Compass update was too empty"};
   var unsupported=lcUnsupportedGeneratedEntity(packedRaw,"",[lcCompassEvidence(cfg,Math.max(0,(lc.compass&&lc.compass.verifiedTurn||0)-cfg.storyWindow)),lc.generatedPlot||""]); if(unsupported)return{ok:false,error:"Narrative Compass introduced unsupported named entity: "+unsupported};
   var order=["guard","intents","anchors","pressure","objective","momentum"],trimGuard=0; while(lcCompassSnapshotText(next,100000).length>cfg.compassMax&&trimGuard++<18){var field=order[trimGuard%order.length];if(field==="intents"&&next.intents.length)next.intents.pop();else if(field==="anchors"&&next.anchors.length>1)next.anchors.pop();else if(typeof next[field]==="string"&&next[field].length>32)next[field]=lcClean(next[field],Math.max(32,next[field].length-56));}
   if(lcCompassSnapshotText(next,100000).length>cfg.compassMax)return{ok:false,error:"Narrative Compass could not fit configured compassMax safely"};
-  var oldSig=lcHash(lcCompassSnapshotText(lc.compass,100000)),newSig=lcHash(lcCompassSnapshotText(next,100000)),changed=oldSig!==newSig;if(!changed&&lc.compass&&typeof lc.compass==="object")next.lastTurn=lc.compass.lastTurn||0;lc.compass=next;lc.lastCompassCheck=now;if(changed){lc.lastCompassUpdate=now;lc.stats.compassUpdates++;}else lc.stats.skippedTasks++;return{ok:true,changed:changed};
+  var old=lc.compass&&typeof lc.compass==="object"?lc.compass:{},changed=lcCompassMeaningfullyChanged(old,next);
+  if(!changed&&Object.keys(old).length){old.verifiedTurn=now;lc.compass=old;lc.lastCompassCheck=now;lc.stats.skippedTasks++;return{ok:true,changed:false};}
+  lc.compass=next;lc.lastCompassCheck=now;lc.lastCompassUpdate=now;lc.stats.compassUpdates++;return{ok:true,changed:true};
 }
 
 function lcWriteCurrentToCard(name, current, cfg) {
@@ -5975,68 +6106,25 @@ function lcProcessCurrent(task, data, cfg) {
   var lc = lcEnsureState(), name = lcClean(task && task.payload && task.payload.name, 80), status = lcDataStatus(data), now = lcCurrentActionCount();
   if (!data) return { ok: false, error: "missing Character Current data" };
   if (status !== "update" && status !== "skip" && status !== "unchanged") return { ok: false, error: "invalid Character Current status" };
-
   var matches = lcFindCardForEntity(name);
   if (matches.length !== 1 || lcCardKind(matches[0]) !== "character") return { ok: false, error: "Character Current target is not a unique Character card" };
   var card = matches[0], old = lcCurrentForCard(card) || { name: card.title || name, cardId: card.id, lastTurn: 0, verifiedTurn: 0 };
-
-  // A skip means the model lacked enough evidence. It is a completed check, but
-  // it must not make an old snapshot look freshly verified.
-  if (status === "skip") {
-    lc.lastCurrentCheck = now;
-    lc.stats.skippedTasks++;
-    return { ok: true, changed: false };
-  }
-
+  if (status === "skip") { lc.lastCurrentCheck = now; lc.stats.skippedTasks++; return { ok: true, changed: false }; }
   if (status === "unchanged") {
-    var prevVerified = old.verifiedTurn || 0;
-    old.verifiedTurn = now;
-    if (!lcWriteCurrentToCard(card.title || name, old, cfg)) {
-      old.verifiedTurn = prevVerified;
-      return { ok: false, error: "could not persist verified Character Current notes" };
-    }
-    lc.currents[lcNorm(card.title || name)] = old;
-    lc.lastCurrentCheck = now;
-    lc.stats.skippedTasks++;
-    return { ok: true, changed: false };
+    var prevVerified = old.verifiedTurn || 0; old.verifiedTurn = now;
+    if (!lcWriteCurrentToCard(card.title || name, old, cfg)) { old.verifiedTurn = prevVerified; return { ok: false, error: "could not persist verified Character Current notes" }; }
+    lc.currents[lcNorm(card.title || name)] = old; lc.lastCurrentCheck = now; lc.stats.skippedTasks++; return { ok: true, changed: false };
   }
-
   if (!data.current || typeof data.current !== "object" || Array.isArray(data.current)) return { ok: false, error: "Character Current update omitted its current object" };
-  var cur = data.current;
+  var cur = data.current, required = ["mood", "intent", "pressure", "assumption", "withheld"];
   if (typeof cur.name !== "string") return { ok: false, error: "Character Current update omitted its NPC name" };
-  var required = ["mood", "intent", "pressure", "assumption", "withheld"];
   for (var i = 0; i < required.length; i++) if (typeof cur[required[i]] !== "string") return { ok: false, error: "Character Current update omitted " + required[i] };
   if (lcNorm(cur.name) !== lcNorm(name) && lcNorm(cur.name) !== lcNorm(card.title || "")) return { ok: false, error: "Character Current returned the wrong NPC" };
-
-  var next = {
-    name: card.title || name,
-    cardId: card.id != null ? card.id : (old.cardId != null ? old.cardId : null),
-    mood: lcClean(cur.mood, 150),
-    intent: lcClean(cur.intent, 170),
-    pressure: lcClean(cur.pressure, 160),
-    assumption: lcClean(cur.assumption, 180),
-    withheld: lcClean(cur.withheld, 180),
-    lastTurn: now,
-    verifiedTurn: now
-  };
-  var oldSig = lcHash(JSON.stringify({ mood: old.mood || "", intent: old.intent || "", pressure: old.pressure || "", assumption: old.assumption || "", withheld: old.withheld || "" }));
-  var newSig = lcHash(JSON.stringify({ mood: next.mood, intent: next.intent, pressure: next.pressure, assumption: next.assumption, withheld: next.withheld }));
-  var changed = oldSig !== newSig;
-  if (!changed) next.lastTurn = old.lastTurn || 0;
-
-  // Persist first. A failed card write must not leave state claiming an update
-  // the player cannot see in Notes.
+  var proposed={mood:lcClean(cur.mood,150),intent:lcClean(cur.intent,170),pressure:lcClean(cur.pressure,160),assumption:lcClean(cur.assumption,180),withheld:lcClean(cur.withheld,180)};
+  var fieldChanged={},changed=false; required.forEach(function(k){fieldChanged[k]=lcMaterialTextDifferent(old[k]||"",proposed[k]||"",0.65);if(fieldChanged[k])changed=true;});
+  var next={name:card.title||name,cardId:card.id!=null?card.id:(old.cardId!=null?old.cardId:null),mood:fieldChanged.mood?proposed.mood:(old.mood||proposed.mood),intent:fieldChanged.intent?proposed.intent:(old.intent||proposed.intent),pressure:fieldChanged.pressure?proposed.pressure:(old.pressure||proposed.pressure),assumption:fieldChanged.assumption?proposed.assumption:(old.assumption||proposed.assumption),withheld:fieldChanged.withheld?proposed.withheld:(old.withheld||proposed.withheld),lastTurn:changed?now:(old.lastTurn||0),verifiedTurn:now};
   if (!lcWriteCurrentToCard(next.name || name, next, cfg)) return { ok: false, error: "could not persist Character Current notes" };
-
-  var oldKey = null;
-  Object.keys(lc.currents).some(function(k) { if (lc.currents[k] === old) { oldKey = k; return true; } return false; });
-  var newKey = lcNorm(next.name || name);
-  if (oldKey && oldKey !== newKey) delete lc.currents[oldKey];
-  lc.currents[newKey] = next;
-  lc.lastCurrentCheck = now;
-  if (changed) { lc.lastCurrentUpdate = now; lc.stats.currentUpdates++; }
-  else lc.stats.skippedTasks++;
-  return { ok: true, changed: changed, name: next.name || name };
+  var oldKey=null;Object.keys(lc.currents).some(function(k){if(lc.currents[k]===old){oldKey=k;return true;}return false;});var newKey=lcNorm(next.name||name);if(oldKey&&oldKey!==newKey)delete lc.currents[oldKey];lc.currents[newKey]=next;lc.lastCurrentCheck=now;if(changed){lc.lastCurrentUpdate=now;lc.stats.currentUpdates++;}else lc.stats.skippedTasks++;return{ok:true,changed:changed,name:next.name||name};
 }
 
 
@@ -6082,7 +6170,7 @@ function lcStatusText(cfg) {
     "Timeline repairs: " + (lc.stats.timelineRepairs||0) + " | refresh rollbacks: " + (lc.stats.cardsRolledBack||0) + " | undone auto-cards removed: " + (lc.stats.cardsRemovedOnUndo||0), "",
     "Plot Essentials: " + cfg.plotEssentials + " | every " + cfg.plotEvery + " | last check " + (lc.lastPlotCheck||0) + " | last changed " + (lc.lastMemoryUpdate||0),
     "Author's Note: " + cfg.authorsNote + " | every " + cfg.authorEvery + " | last check " + (lc.lastAuthorCheck||0) + " | last changed " + (lc.lastAuthorUpdate||0),
-    "Narrative Compass: " + cfg.narrativeCompass + " | strength " + cfg.compassStrength + " | drift guard " + cfg.driftGuard + " | last check " + (lc.lastCompassCheck||0) + " | verified " + lcCompassVerifiedTurn(lc.compass) + " | drift " + ((lc.compass&&lc.compass.drift)||"none"),
+    "Narrative Compass: " + cfg.narrativeCompass + " | base strength " + cfg.compassStrength + " | adaptive " + cfg.adaptiveGuidance + " | runtime rank " + lcCompassRuntimeRank(cfg,lc.compass) + " | effective interval " + lcEffectiveCompassInterval(cfg) + " | breathing " + cfg.sceneBreathing + " | budget " + cfg.guidanceBudget + " | last check " + (lc.lastCompassCheck||0) + " | verified " + lcCompassVerifiedTurn(lc.compass) + " | drift " + ((lc.compass&&lc.compass.drift)||"none"),
     "Generated memory chars: plot " + String(lc.generatedPlot||"").length + " | author " + String(lc.generatedAuthor||"").length + " | manual baselines " + String(lc.basePlot||"").length + "/" + String(lc.baseAuthor||"").length, "",
     "Character Current: " + cfg.characterCurrent + " | influence " + cfg.currentInfluence + " | stored " + currentRows.length + " | stale " + staleCurrent + " | expiry " + cfg.currentExpiry,
     "Current last check " + (lc.lastCurrentCheck||0) + " | last changed " + (lc.lastCurrentUpdate||0), "",
@@ -6216,7 +6304,9 @@ function lcContextPass(text) {
   if(lc.commandConsume){lc.pendingTask=null;lc.forcedTask=null;return lcFitContextInstruction(base,"\n[CHRONICLE CODEX control action] This action was consumed by the script. Do not continue or alter the story. Output only <CHRONICLE_CODEX_COMMAND_ACK>.");}
   lcAdoptManagedCards(cfg);lcAdoptLegacyCards(cfg);lcIngestHistory(cfg);lcEnsureMemoryMirror(cfg);if(lc.pendingTask&&lc.pendingTask.actionCount!==lcCurrentActionCount())lc.pendingTask=null;
   var task=lcScheduleForcedTask(cfg);if(!task)task=lcScheduleAutomaticTask(cfg);if(task){if((task.kind==="create"||task.kind==="refresh")&&!cfg.codex)task=null;else if(task.kind==="create"&&!cfg.codexCreate)task=null;else if(task.kind==="refresh"&&!cfg.codexRefresh)task=null;else if(task.kind==="compass"&&!cfg.narrativeCompass)task=null;else if(task.kind==="current"&&!cfg.characterCurrent)task=null;else if(task.kind==="memory"&&!cfg.plotEssentials&&!cfg.authorsNote)task=null;}
-  var additions=[];var compassInfluence=lcCompassInfluenceInstruction(cfg);if(compassInfluence)additions.push(compassInfluence);var influence=lcCurrentInfluenceInstruction(cfg);if(influence)additions.push(influence);if(task){lc.pendingTask=task;lc.lastTaskAttempt[task.kind]=lcCurrentActionCount();additions.push(lcBuildTaskInstruction(task,cfg));}
+  var additions=[];
+  if(!(task&&task.forced)){var pulse=task&&task.kind==="compass"?lcBuildContinuityPulse(cfg,false,true):task&&task.kind==="current"?lcBuildContinuityPulse(cfg,true,false):lcFluidNarrativeGuidance(cfg);if(pulse)additions.push(pulse);}
+  if(task){lc.pendingTask=task;lc.lastTaskAttempt[task.kind]=lcCurrentActionCount();additions.push(lcBuildTaskInstruction(task,cfg));}
   return additions.length?lcFitContextInstruction(base,additions.join("\n")):base;
 }
 
